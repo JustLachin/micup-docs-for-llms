@@ -1,0 +1,114 @@
+# Micup Developer Documentation
+
+> Micup (micup.gg) is a Turkish chat and voice community platform. Its public HTTP API and main Gateway are Fluxer-compatible and Discord-shaped, but they are not Discord: there are no Gateway intents, no HTTP interaction receiver, no Ed25519 interaction signatures, and no `applications.commands` OAuth2 scope.
+
+This index points to the bundled LLM reference and to the live Micup documentation. Read `/.well-known/fluxer` before calling the API; base URLs, features, and limits are deployment-specific.
+
+## Start here
+
+- [MICUP_DEV_REFERENCE.md](./MICUP_DEV_REFERENCE.md): Complete technical reference for bots, OAuth2, HTTP API, Gateway, webhooks, voice, media, and Micup-specific features.
+- [llms-full.txt](./llms-full.txt): README plus the complete reference as one plain-text file.
+- [README.md](./README.md): Repository overview, quick start, and usage with AI tools.
+- [Live documentation](https://micup.gg/docs/): The authoritative human documentation.
+- [Instance discovery](https://micup.gg/.well-known/fluxer): Live base URLs, feature flags, and limits. No authentication required.
+
+## Core facts
+
+- Discovery: `GET https://micup.gg/.well-known/fluxer`
+- REST API: read `endpoints.api_public`; use paths under `/v1`
+- Gateway: read `endpoints.gateway`; connect with `?v=1&encoding=json`
+- Media Proxy: read `endpoints.media`
+- Upload relay: read `endpoints.upload_relay`; use issued URLs unchanged
+- Bot auth on REST: `Authorization: Bot <token>`
+- Bot auth on Gateway: raw token in `Identify` (no prefix)
+- User session auth: raw token with no scheme prefix
+- OAuth2: `Authorization: Bearer <access_token>` only on routes that opt in
+- API version: `/v1` only
+- Gateway version: `v=1` only
+- Snowflakes: unsigned decimal strings; never parse as JSON numbers
+- Errors: match `code`, never the localized `message`
+- Rate limits: per-route plus a global bucket; obey `retry_after`
+- Official SDK: none documented; discord.js 14 and discord.py 2 work with configuration
+
+## Authentication and applications
+
+- [Authentication](https://micup.gg/docs/authentication/): Credential schemes, bot tokens, session tokens, OAuth2 bearers, sudo mode, Gateway authentication.
+- [Applications](https://micup.gg/docs/http-api/applications/): Create an application and its bot account, bot profiles, token rotation, public applications.
+- [OAuth2](https://micup.gg/docs/http-api/oauth2/): Authorization code grant, PKCE, scopes, token exchange, refresh, userinfo, introspection, revocation.
+- [Instance](https://micup.gg/docs/http-api/instance/): Discovery document, limit rules, bot catalog, OpenAPI endpoint.
+
+## HTTP API
+
+- [HTTP API conventions](https://micup.gg/docs/http-api/): Request format, multipart, standard headers, errors, rate limits, pagination.
+- [Errors](https://micup.gg/docs/http-api/errors/): Error envelope, validation errors, API and validation code registries.
+- [Rate limits](https://micup.gg/docs/topics/rate-limits/): Buckets, scopes, headers, and denial bodies.
+- [Snowflakes](https://micup.gg/docs/snowflakes/): Identifier layout, wire grammar, and pagination cursors.
+- [Permissions](https://micup.gg/docs/http-api/permissions/): Permission bitfield, computation, role hierarchy, role routes.
+- [Guilds](https://micup.gg/docs/http-api/guilds/): Guild object, features, lifecycle, configuration.
+- [Guild channels](https://micup.gg/docs/http-api/guild-channels/): Channel creation and reordering.
+- [Channels](https://micup.gg/docs/http-api/channels/): Channel object, types, overwrites, DMs, slowmode.
+- [Guild members](https://micup.gg/docs/http-api/guild-members/): Member objects, nicknames, roles, timeouts, voice moves, kicks.
+- [Guild moderation](https://micup.gg/docs/http-api/guild-moderation/): Bans, temporary bans, ban replacement.
+- [Invites](https://micup.gg/docs/http-api/invites/): Invite creation, retrieval, deletion.
+- [Messages](https://micup.gg/docs/http-api/messages/): Message object, embeds, attachments, components, reactions, pins, bulk delete.
+- [Users](https://micup.gg/docs/http-api/users/): User objects, profiles, settings, relationships, DMs, read states.
+- [Webhooks](https://micup.gg/docs/http-api/webhooks/): Incoming webhooks, execution, Slack/GitHub/Instatus compatibility, channel followers.
+
+## Bots and interactions
+
+- [Turkish bot quick start](https://micup.gg/docs/bots/hizli-baslangic/): Create a bot, invite it, send the first message with Python.
+- [Turkish interactions guide](https://micup.gg/docs/bots/etkilesimler/): discord.js and discord.py examples for slash commands, buttons, selects, modals, and autocomplete.
+- [Application commands](https://micup.gg/docs/http-api/application-commands/): Command registration, option types, limits, contexts, command catalog.
+- [Interactions](https://micup.gg/docs/http-api/interactions/): Interaction lifecycle, callback types, private responses, followups, modals, autocomplete, error codes.
+- [Message components](https://micup.gg/docs/http-api/messages/#message-components): Buttons, select menus, action rows, modals, Components v2 status.
+
+## Gateway
+
+- [Gateway overview](https://micup.gg/docs/gateway/overview/): Connection, framing, compression, state machine, heartbeats, resume, sharding.
+- [Gateway commands](https://micup.gg/docs/gateway/commands/): Identify, Resume, Heartbeat, Presence Update, Voice State Update, Lazy Request, member requests.
+- [Gateway events](https://micup.gg/docs/gateway/events/): Dispatch envelope, READY, guild/channel/message/voice/application events.
+- [Opcodes and close codes](https://micup.gg/docs/gateway/opcodes-and-close-codes/): Complete numeric registry and exact close reasons.
+- [Event filtering](https://micup.gg/docs/gateway/event-filtering/): No intents; ignored events, guild subscriptions, passive guilds, member lists.
+- [Gateway limits](https://micup.gg/docs/gateway/limits-and-rate-limits/): Session, payload, Identify, replay, and command limits.
+
+## Voice and media
+
+- [Voice](https://micup.gg/docs/voice/): LiveKit transport, voice placement, permissions, capacity, private calls, Go Live, entrance sounds.
+- [Voice seats](https://micup.gg/docs/http-api/voice-seats/): 3D room themes, lounge/table/watch seats, room character, sealed room files.
+- [Table games](https://micup.gg/docs/http-api/table-games/): Okey, 101, chess, dama, tavla, ranked tables, leagues, leaderboards.
+- [Media Proxy](https://micup.gg/docs/media-proxy/overview/): Route families, signed URLs, media modes.
+- [Media routes](https://micup.gg/docs/media-proxy/routes/): Attachment, external media, theme, entrance sound, image asset, static object routes.
+- [Uploads](https://micup.gg/docs/topics/uploads/): Multipart and pre-upload attachment flows.
+- [Upload relay](https://micup.gg/docs/media-proxy/upload-relay/): Capability-authorised uploads and limits.
+
+## Micup platform features
+
+- [MicupBOT](https://micup.gg/docs/http-api/guild-micupbot/): Official community bot settings, automod, reaction roles, level rewards, warnings.
+- [Micup Roster](https://micup.gg/docs/http-api/guild-roster-events/): Hourly roster events, Join/Leave buttons, voice checks.
+- [Feed](https://micup.gg/docs/http-api/feed/): Posts, images, video, polls, Discover, categories, topics, comments, notifications.
+- [Shop](https://micup.gg/docs/http-api/shop/): Cosmetics, bundles, premium packages, Visionary, boost slots, username cards, Payriff orders.
+- [Premium](https://micup.gg/docs/http-api/premium/): Premium entitlement, billing state, subscription self-service.
+- [Badges](https://micup.gg/docs/http-api/users/badges/): Built-in and catalog badges, visibility.
+- [Cosmetics](https://micup.gg/docs/http-api/cosmetics/): Avatar decorations, profile effects, nameplates, room character items.
+- [Referral](https://micup.gg/docs/http-api/referral/): Referral codes, states, tiers, rewards.
+- [Interest onboarding](https://micup.gg/docs/http-api/interest-onboarding/): One-time interest picker and guild joins.
+- [Discovery](https://micup.gg/docs/http-api/discovery/): Public guild directory, applications, preview, join.
+
+## Optional
+
+- [OpenAPI document](https://micup.gg/api/v1/openapi.json): Deployment OpenAPI 3.1 schema. Unauthenticated.
+- [Bot catalog](https://micup.gg/api/v1/instance/bot-catalog): Official and verified community bots. Unauthenticated.
+- [Admin API](https://micup.gg/docs/admin-api/): Privileged instance management. Requires an Admin API key; bots are rejected.
+- [Self-hosting](https://micup.gg/docs/operator/get-started/): Operator documentation for running a Micup/Fluxer deployment.
+- [Downloads](https://micup.gg/docs/downloads/overview/): Desktop and mobile download documentation.
+
+## Non-negotiable rules for LLMs
+
+1. Read `https://micup.gg/.well-known/fluxer` first. Do not hard-code API, Gateway, media, or web/admin origins.
+2. Do not invent Gateway intents, privileged intents, `applications.commands`, user-installable apps, HTTP interaction endpoints, Ed25519 signatures, or `PING` interactions.
+3. Use `Authorization: Bot <token>` for bot REST; send the raw token in `Identify` for the Gateway.
+4. Treat snowflakes as strings, interaction tokens as credentials, and signed media URLs as bearer capabilities.
+5. Match error `code` values, not localized messages.
+6. Read `features` and `limits` from discovery. Do not assume a Micup-specific feature is enabled.
+7. Feed, shop, table games, voice seats, badges, cosmetics, referrals, interest onboarding, and MicupBOT/Roster settings are user-only. A bot receives `403 ACCESS_DENIED`.
+8. When unsure, prefer the live documentation and the OpenAPI document over this summary.

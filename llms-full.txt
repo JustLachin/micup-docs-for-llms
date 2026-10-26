@@ -1,0 +1,3426 @@
+# Micup Geliştirici Dokümantasyonu — LLM'ler ve AI Ajanları için
+
+Micup'ın herkese açık **HTTP API**, **Gateway**, **webhook**, **ses/medya** ve Micup'a özel platform özelliklerini AI kodlama araçlarının doğru kullanması için hazırlanmış, tek dosyada yoğunlaştırılmış teknik referans.
+
+> **Sürüm:** 1.0 · **Canlı doğrulama:** 26 Ekim 2026
+> **Canlı dokümanlar:** <https://micup.gg/docs/> · **Keşif:** <https://micup.gg/.well-known/fluxer>
+
+Bu depo, [jubbio-docs-for-llms](https://github.com/saintberat/jubbio-docs-for-llms) yaklaşımının Micup için uyarlanmış halidir: modellerin Micup yerine Discord API'si uydurmasını engellemek için doğrulanmış uç noktalar, kimlik doğrulama kuralları, Gateway opcode'ları, etkileşim akışı ve Micup'a özel özellikler tek bir referansta toplanır.
+
+Teknik referans, alan adları, başlıklar ve hata kodlarının birebir korunması için İngilizce yazılmıştır. README ve kullanım notları Türkçedir. Bu depo resmî bir Micup yayını değildir; canlı dokümanların yerini almaz.
+
+---
+
+## İçindekiler
+
+| Dosya | Ne işe yarar |
+| --- | --- |
+| [MICUP_DEV_REFERENCE.md](./MICUP_DEV_REFERENCE.md) | Ana teknik referans. Bot, OAuth2, HTTP API, Gateway, webhook, ses, medya ve Micup özellikleri. |
+| [llms.txt](./llms.txt) | LLM'ler için kısa indeks: canlı doküman bağlantıları ve yerel dosyalar. |
+| [llms-full.txt](./llms-full.txt) | README + ana referansın düz metin birleşimi. Claude Projeleri ve ChatGPT Knowledge için uygundur. |
+| [LICENSE](./LICENSE) | AGPL-3.0-or-later lisans metni. |
+
+---
+
+## Neden bu depo?
+
+Micup yeni bir platformdur ve genel amaçlı modellerin eğitim verisinde Micup API'sinin ayrıntıları yoktur. Bu yüzden modeller sık sık:
+
+- Discord'un `discord.com/api` adresini veya `gateway.discord.gg` Gateway'ini kullanır,
+- Micup'ta **bulunmayan** Gateway intent'lerini ve ayrıcalıklı intent onayını varsayar,
+- Etkileşimleri HTTP endpoint'i ile almaya çalışır ve Ed25519 imza doğrulaması ekler,
+- `applications.commands` kapsamını ister,
+- Snowflake'leri JSON sayısı olarak ayrıştırır,
+- Micup'a özel `MicupBOT`, feed, masa oyunları ve mağaza rotalarını botlarla çağırmaya çalışır.
+
+Bu referans, bu hataların çoğunu kaynağında kapatır.
+
+---
+
+## Hızlı gerçekler
+
+| Bileşen | Değer |
+| --- | --- |
+| Keşif | `GET https://micup.gg/.well-known/fluxer` |
+| HTTP API | `endpoints.api_public` + `/v1` (canlı: `https://micup.gg/api/v1`) |
+| Gateway | `endpoints.gateway` + `?v=1&encoding=json` (canlı: `wss://micup.gg/gateway`) |
+| Bot kimlik doğrulama | `Authorization: Bot <token>` |
+| Kullanıcı oturumu | `Authorization: <token>` (şema öneki yok) |
+| OAuth2 | `Bearer <token>`, yalnızca açıkça desteklenen rotalarda |
+| API sürümü | Yalnızca `/v1` |
+| Gateway sürümü | Yalnızca `v=1` |
+| Resmî Micup SDK'sı | Dokümante edilmemiş; discord.js 14 / discord.py 2 kullanın |
+| OpenAPI | `GET https://micup.gg/api/v1/openapi.json` |
+| Bot kataloğu | `GET https://micup.gg/api/v1/instance/bot-catalog` |
+| Canlı dokümanlar | <https://micup.gg/docs/> |
+
+**Önemli:** Bu değerler 26 Ekim 2026'daki canlı keşif yanıtından alınmıştır. Bir istemci her zaman `/.well-known/fluxer` okumalıdır; adresleri koda gömmeyin.
+
+---
+
+## AI araçlarıyla kullanım
+
+### Cursor / Windsurf
+
+1. Depoyu klonlayın veya indirin.
+2. `MICUP_DEV_REFERENCE.md` dosyasını projenize ekleyin.
+3. Cursor'da **Docs** veya proje kuralları bağlamına ekleyin.
+4. Depoyu yayınladıktan sonra `llms.txt` dosyasının ham (raw) URL'sini uzak doküman indeksi olarak ekleyebilirsiniz.
+
+### Claude Projeleri / ChatGPT Custom GPT
+
+- `MICUP_DEV_REFERENCE.md` veya `llms-full.txt` dosyasını proje bilgi tabanına yükleyin.
+- Uzun bağlam penceresi varsa `llms-full.txt`, daha kısa bağlamda `MICUP_DEV_REFERENCE.md` kullanın.
+
+### Sistem promptu
+
+Micup kodu üretirken şu kısa yönergeyi sistem promptuna ekleyebilirsiniz:
+
+```text
+Micup API'si için yalnızca şu kaynakları doğru kabul et:
+1. https://micup.gg/.well-known/fluxer keşif yanıtı
+2. https://micup.gg/docs/ canlı dokümanları
+3. Bu projedeki MICUP_DEV_REFERENCE.md
+
+Micup, Discord değildir. Gateway intent'leri yoktur; etkileşimler HTTP ile
+alınmaz, Gateway üzerinden gelir; Ed25519 imzası ve PING yoktur;
+applications.commands kapsamı yoktur. Tüm snowflake'ler string'dir ve
+API tabanı keşiften okunur. Bilinmeyen bir uç nokta veya alan uydurma.
+```
+
+### Doğrudan API çağrısı
+
+```js
+const discovery = await (await fetch('https://micup.gg/.well-known/fluxer')).json();
+const api = discovery.endpoints.api_public.replace(/\/$/, '');
+
+const response = await fetch(`${api}/v1/channels/${channelId}/messages`, {
+  method: 'POST',
+  headers: {
+    Authorization: `Bot ${process.env.MICUP_TOKEN}`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({content: 'Merhaba, Micup!'}),
+});
+
+console.log(response.status, await response.text());
+```
+
+Tam örnekler ve hata yönetimi için [MICUP_DEV_REFERENCE.md](./MICUP_DEV_REFERENCE.md) §16'ya bakın.
+
+---
+
+## İlk botu oluşturma
+
+1. Micup'ta **Ayarlar → Uygulamalar** bölümünü açın.
+2. **Uygulama oluştur** ile bir ad verin. Uygulamayla birlikte bot hesabı da oluşturulur.
+3. **Bot token** değerini hemen kopyalayın. Tam token yalnızca oluşturma veya yenileme yanıtında gösterilir.
+4. Botu davet edin:
+
+```text
+https://micup.gg/oauth2/authorize?client_id=UYGULAMA_ID&scope=bot&permissions=3072
+```
+
+`3072`, `VIEW_CHANNEL` (1024) + `SEND_MESSAGES` (2048) toplamıdır.
+
+5. Kanal kimliğini `https://micup.gg/channels/SUNUCU_ID/KANAL_ID` bağlantısından alın.
+6. Mesaj gönderin:
+
+```bash
+curl -X POST "https://micup.gg/api/v1/channels/KANAL_ID/messages" \
+  -H "Authorization: Bot $MICUP_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"content":"Merhaba, Micup!"}'
+```
+
+Slash komut, buton, menü ve modal için referansın **§8 Application commands and interactions** bölümüne, Gateway bağlantısı için **§9 Gateway** bölümüne bakın.
+
+---
+
+## Sık yapılan hatalar
+
+| Hata | Doğrusu |
+| --- | --- |
+| `https://discord.com/api` kullanmak | `endpoints.api_public` + `/v1` |
+| `wss://gateway.discord.gg` kullanmak | `endpoints.gateway` + `?v=1&encoding=json` |
+| Gateway intent'leri göndermek | Micup'ta intent yoktur; `ignored_events` ve `Lazy Request` kullanın |
+| Etkileşimler için HTTP sunucusu açmak | Etkileşimler Gateway'den `INTERACTION_CREATE` olarak gelir |
+| Ed25519 imzası doğrulamak | Micup imza kullanmaz; etkileşim token'ı kimlik bilgisidir |
+| `applications.commands` istemek | `scope=bot` yeterlidir |
+| Snowflake'i `Number` ile ayrıştırmak | String olarak tutun, tam sayı olarak karşılaştırın |
+| Bot token'ı URL'ye koymak | `Authorization: Bot <token>` kullanın |
+| MicupBOT/feed/mağaza rotalarını botla çağırmak | Bu rotalar kullanıcı oturumu ister; bot `403 ACCESS_DENIED` alır |
+| `403`/`401` yanıtını aynı istekle tekrar denemek | `code` alanını okuyun; kimlik bilgisini veya isteği düzeltin |
+| `429` yanıtını beklemeden tekrarlamak | `retry_after` / `Retry-After` kadar bekleyin |
+
+---
+
+## Kapsam ve doğrulama
+
+**Doğrulananlar (26 Ekim 2026):**
+
+- `GET /.well-known/fluxer` → HTTP 200, canlı endpoint ve özellik değerleri.
+- `GET /api/v1/instance/bot-catalog` → HTTP 200, resmî Micup bot kartları.
+- `GET /api/v1/gateway/bot` (kimlik bilgisi olmadan) → HTTP 401.
+- Canlı doküman ana sayfası, Gateway ve HTTP API sayfaları okundu.
+- OpenAPI dokümanı → 402 path, 894 şema.
+- Micup kaynak arşivindeki doküman kaynakları, izin kaydı, Gateway kaydı ve Micup'a özel rotalar.
+
+**Doğrulanmayanlar (kimlik bilgisi/test hesabı gerektirir):**
+
+- Gerçek bot ile giriş, mesaj gönderme ve etkileşim yanıtlama.
+- Tam OAuth2 yetkilendirme/kod/token/refresh döngüsü.
+- Ses yerleşimi ve LiveKit medyası.
+- Masa oyunları, mağaza ödeme akışı, referral ve ilgi seçimi.
+- Admin API davranışı.
+
+Bu bölümler protokol dokümantasyonudur; uçtan uca canlı test raporu değildir.
+
+---
+
+## Depo yapısı ve bakım
+
+```text
+micup-docs-for-llms/
+├── README.md
+├── MICUP_DEV_REFERENCE.md
+├── llms.txt
+├── llms-full.txt
+└── LICENSE
+```
+
+Bakım kuralları:
+
+- Uç noktaları değiştirmeden önce `/.well-known/fluxer` yanıtını yeniden okuyun.
+- `GET /v1/openapi.json` ile referansı karşılaştırın.
+- `MICUP_DEV_REFERENCE.md` değiştiğinde `llms-full.txt` dosyasını yeniden üretin.
+- Doğrulama tarihini ve canlı keşif anlık görüntüsünü güncelleyin.
+
+`llms-full.txt` üretimi:
+
+```bash
+cat README.md MICUP_DEV_REFERENCE.md > llms-full.txt
+```
+
+---
+
+## Lisans ve atıf
+
+Bu depodaki dokümantasyon içeriği **AGPL-3.0-or-later** altında dağıtılır. Micup'ın dokümantasyonu ve kaynak kodu, Fluxer projesinden (<https://github.com/fluxerapp/fluxer>) türetilmiştir ve aynı lisansı taşır. Ayrıntılar için [LICENSE](./LICENSE).
+
+"Micup" ve "Fluxer" adları ile logoları lisans kapsamında değildir; lisans marka hakkı vermez.
+
+`X-Fluxer-*` başlıkları, `/.well-known/fluxer` yolu ve `flx_` token öneki gibi protokol tanımlayıcıları tel uyumluluğu için korunmuştur; Fluxer ile bir bağlantı iddiası değildir.
+
+---
+
+## English summary
+
+This repository is an LLM-oriented technical reference for **Micup** (`micup.gg`), a Turkish chat and voice community platform built on the Fluxer protocol. It condenses Micup's public HTTP API, Gateway, OAuth2, webhooks, voice, media, and Micup-specific features into one verified document.
+
+Micup is **Discord-shaped but not Discord**: there are no Gateway intents, no HTTP interaction receiver, no Ed25519 signatures, and no `applications.commands` scope. Always read base URLs from `https://micup.gg/.well-known/fluxer`; never hard-code Discord domains.
+
+Files:
+
+- [`MICUP_DEV_REFERENCE.md`](./MICUP_DEV_REFERENCE.md) — the complete technical reference.
+- [`llms.txt`](./llms.txt) — compact index and live documentation links.
+- [`llms-full.txt`](./llms-full.txt) — README plus the complete reference as plain text.
+- [`LICENSE`](./LICENSE) — AGPL-3.0-or-later.
+
+The reference was verified against live Micup discovery and documentation on **26 October 2026**. It is not an official Micup publication, and it does not replace the live documentation at <https://micup.gg/docs/>.
+# Micup Developer Reference for LLMs and AI Agents
+
+> **Version:** 1.0
+> **Verified against live Micup services:** 26 October 2026
+> **Live documentation:** <https://micup.gg/docs/>
+> **Instance discovery:** <https://micup.gg/.well-known/fluxer>
+> **Scope:** public bot, application, OAuth2, HTTP API, Gateway, webhook, voice, media, and Micup-specific platform surfaces.
+> **Not covered:** Admin API internals. See <https://micup.gg/docs/admin-api/>.
+
+This document is a compact, machine-readable ground truth for AI coding assistants that write Micup bots, integrations, and clients. It is derived from Micup's live developer documentation and the Micup source archive. Where this document and the live documentation disagree, the live documentation and the deployment's discovery document win.
+
+Normative keywords **MUST**, **MUST NOT**, **SHOULD**, and **MAY** describe client requirements. Field names, type numbers, routes, and error codes are literal. All identifiers are decimal strings unless stated otherwise.
+
+---
+
+## 0. Read this first
+
+Micup is **not Discord**, even though its API is deliberately Discord-shaped and is built on the Fluxer protocol. A bot copied from a Discord tutorial usually needs four changes:
+
+1. Point the REST base at `endpoints.api_public` from discovery and use `/v1`.
+2. Set the Gateway version to `v=1` at the discovered `endpoints.gateway`.
+3. Use `Authorization: Bot <token>` for bot REST calls.
+4. Stop relying on Discord-only features: there are **no Gateway intents**, **no HTTP endpoint that receives interactions**, **no Ed25519 interaction signatures**, **no `PING` interaction**, and **no `applications.commands` OAuth2 scope**.
+
+Other rules that prevent most hallucinations:
+
+- **Never hard-code `discord.com`, `discordapp.com`, `cdn.discordapp.com`, or `gateway.discord.gg`.** Read the published base URLs from `GET /.well-known/fluxer`.
+- **Never parse a snowflake as a JSON number.** IDs are 64-bit decimal strings.
+- **Never match on the human-readable `message` field.** Match on `code`.
+- **Never put a bot token, webhook token, interaction token, or signed media URL in logs, source code, URLs, analytics, or error reports.**
+- **Do not invent Micup SDK packages.** No official Micup SDK is documented. Use a Discord-compatible library (discord.js 14 or discord.py 2) or the raw HTTP/WebSocket protocol.
+- **Do not assume a feature is enabled.** Read `features`, `limits`, and per-route feature flags. Several Micup features are deployment-gated or temporarily disabled.
+- **The deployment is one instance.** Micup's live instance is at `micup.gg`, but the protocol is designed for multiple deployments. A value that is true on one deployment can be false on another.
+
+If you only remember one thing: **discover first, then call**. The discovery document is the entry point of the entire API.
+
+---
+
+## 1. Platform overview
+
+Micup (micup.gg) is a chat and voice community platform with a Turkish-first product experience. Users join communities (called **guilds** in the API), talk in text and voice channels, send direct messages, publish feed posts, play table games in 3D voice rooms, and buy cosmetic and premium products.
+
+### 1.1 Protocol surfaces
+
+| Surface | Purpose | Base |
+| --- | --- | --- |
+| HTTP API | Read and mutate resources | `endpoints.api_public` + `/v1` |
+| Gateway | Persistent WebSocket for events and a small command set | `endpoints.gateway` with `?v=1&encoding=json` |
+| Media Proxy | Attachments, images, themes, signed external media | `endpoints.media` |
+| Upload relay | Capability-authorised uploads | `endpoints.upload_relay` |
+| Admin API | Privileged instance management | `endpoints.admin` + `/v1/admin` |
+| Developer docs | Human documentation | <https://micup.gg/docs/> |
+| OpenAPI | Machine-readable HTTP schema | `GET /v1/openapi.json` |
+
+The Media Proxy and the Admin API each have their own authentication. Nothing negotiated on one surface applies to another.
+
+### 1.2 Live discovery snapshot
+
+These are the values Micup published on **26 October 2026**. Treat them as examples, not constants.
+
+| Field | Value |
+| --- | --- |
+| `api_code_version` | `1` |
+| `endpoints.api_public` | `https://micup.gg/api` |
+| `endpoints.api_client` | `https://micup.gg/api` |
+| `endpoints.gateway` | `wss://micup.gg/gateway` |
+| `endpoints.media` | `https://media.micup.gg` |
+| `endpoints.upload_relay` | `https://micup.gg/media` |
+| `endpoints.static_cdn` | `https://static.micup.gg` |
+| `endpoints.webapp` | `https://micup.gg` |
+| `endpoints.invite` | `https://micup.gg/invite` |
+| `endpoints.gift` | `https://micup.gg/gift` |
+| `endpoints.admin` | `https://admin.micup.gg` |
+| `features.voice_enabled` | `true` |
+| `features.premium_enabled` | `true` |
+| `features.stripe_enabled` | `false` |
+| `features.self_hosted` | `true` |
+| `features.presigned_attachment_uploads` | `true` |
+| `features.emails_enabled` | `true` |
+| `features.gift_codes_enabled` | `true` |
+| `registration.mode` | `open` |
+| `features.account_identity` | `email` |
+| `features.tag_style` | `none` |
+| `captcha.provider` | `turnstile` |
+
+A deployment can change any of these. The live discovery document may also include fields that this snapshot omits.
+
+### 1.3 What "Discord-compatible" means here
+
+| Area | Compatible? | Notes |
+| --- | --- | --- |
+| Route shapes and field names | Mostly | The API follows Discord's naming closely. |
+| Application command types 1–8, 10 | Yes | Types 9 (mentionable) and 11 (attachment) are rejected. |
+| Message components (buttons, selects, modals) | Yes | Type numbers match Discord's. |
+| Discord.js 14 / discord.py 2 | Yes, with configuration | Set the API base and version, and the Gateway URL for discord.py. |
+| Gateway intents | **No** | Micup has no intents field, no privileged intents, and no intent close code. |
+| Receiving interactions over HTTP | **No** | Interactions arrive over the Gateway. |
+| Interaction signing / `PING` | **No** | No Ed25519, no public key, no `PING`. |
+| `applications.commands` scope | **No** | Installing a bot uses `scope=bot`; commands need no separate scope. |
+| User-installable apps | **No** | `integration_types` is accepted and discarded. |
+| Discord CDN URLs | **No** | Attachments and assets are served by the Media Proxy. |
+
+### 1.4 The bot account model
+
+- A **user account** owns an **application**.
+- Creating an application creates exactly **one bot account**.
+- The bot's user ID **equals** its application ID.
+- The bot token is shown **once** at creation or reset. It cannot be read back later.
+- A bot is authenticated on REST with `Authorization: Bot <token>`.
+- A bot is authenticated on the Gateway by sending the raw token in `Identify`, with no `Bot ` prefix.
+- A bot must be a **member of a guild** before it can act there.
+
+---
+
+## 2. Shared conventions
+
+### 2.1 Snowflakes
+
+A snowflake is a 64-bit identifier for a user, guild, channel, message, role, attachment, application, or other resource. It is unique within one deployment and is never reused after deletion. Separate deployments can issue the same numeric value, so scope every snowflake to its deployment.
+
+| Field | Bits | Meaning |
+| --- | --- | --- |
+| Timestamp | 62–22 | Milliseconds since `2015-01-01T00:00:00.000Z` |
+| Worker ID | 21–12 | Unsigned allocator worker, `0`–`1023` |
+| Sequence | 11–0 | Unsigned per-worker sequence, `0`–`4095` |
+
+Extract the approximate creation time:
+
+```text
+timestamp_ms = (snowflake >> 22) + 1420070400000
+```
+
+Wire rules:
+
+- A snowflake is an **unsigned decimal string** in every JSON body, path parameter, query parameter, and Gateway payload.
+- Never parse it as a JSON number. Values exceed the exact integer range of a JSON double.
+- Compare snowflakes as integers, not as text. Decimal strings of different lengths do not sort correctly as text.
+- An HTTP request accepts `0`, or a non-zero digit followed by further digits. Leading zeros, signs, decimal points, and non-digit characters are rejected.
+- A Gateway command accepts a non-zero digit followed by further digits, as a string or as a positive JSON integer. `0`, leading zeros, signed values, negative values, and values above `9223372036854775807` are rejected.
+
+Snowflake-ordered collections accept `before`, `after`, or `around` cursors. `before` selects IDs lower than the cursor; `after` selects IDs higher; `around` selects a window centred on and including the cursor.
+
+### 2.2 Field notation
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `name` | `string` | Required; cannot be `null` |
+| `name?` | `string` | Optional; cannot be `null` when present |
+| `name` | `?string` | Required; can be `null` |
+| `name?` | `?string` | Can be omitted or set to `null` |
+
+`array[type]` is an array of the named type. `map[key, value]` is a JSON object keyed by the first type with values of the second type. An omitted field is not the same as a field set to `null`; each operation defines the difference.
+
+### 2.3 Requests
+
+- Send JSON bodies with `Content-Type: application/json`.
+- OAuth2 token operations accept `application/x-www-form-urlencoded` or `multipart/form-data`.
+- Message creation, message modification, and webhook execution also accept multipart bodies.
+- Responses are UTF-8 JSON unless an operation states otherwise.
+- Trailing slashes are significant.
+- An unknown path or unsupported method returns `404 NOT_FOUND` with no `Allow` header.
+- Every `GET` route supports `HEAD`, returning the same status and headers with no body. Routes without `GET` do not support `HEAD`.
+- Empty values are normalised before validation: an empty string becomes `null`, and an empty nested object becomes `null`. Message creation, message modification, and webhook execution are exceptions and preserve empty values.
+- An overloaded instance returns `503 SERVICE_UNAVAILABLE` with `Retry-After: 1`. Wait before retrying.
+
+### 2.4 Standard request headers
+
+| Header | Purpose |
+| --- | --- |
+| `Authorization` | The single credential: `Bot <token>`, `Bearer <token>`, a raw user session token, or `Admin <key>` |
+| `Content-Type` | Body media type; include the multipart boundary |
+| `Accept-Language` | Selects the locale for an error `message` when the caller has no account locale |
+| `X-Audit-Log-Reason` | Free-text reason recorded on the audit log entry; at most 512 characters after normalisation |
+| `X-Fluxer-Sudo-Mode-JWT` | A short-lived sudo proof for sensitive account operations |
+| `X-Captcha-Token` | A solved CAPTCHA challenge on gated account operations |
+| `X-Request-ID` | Client-chosen correlation ID, echoed unchanged; never send a secret |
+| `X-Fluxer-Features` | Comma-separated feature declarations for feature-gated permission bits |
+| `Origin` | Browser origin, used for CORS and the same-host origin check on mutations |
+
+The `X-Fluxer-*` header prefix is a protocol identifier inherited from Fluxer. It is not branding and must not be renamed.
+
+### 2.5 Standard response headers
+
+| Header | Meaning |
+| --- | --- |
+| `X-Fluxer-Version` | Build version of the serving instance; `dev` when unstamped |
+| `X-Request-ID` | The request ID, generated or echoed |
+| `X-Fluxer-Sudo-Mode-JWT` | A new sudo token after a successful sudo proof |
+| `Content-Type` | Response media type; absent when there is no body |
+| `Cache-Control` | `no-cache` unless the operation sets its own directive |
+| `Retry-After` | Whole seconds to wait on a rate-limit, slowmode, lock, or in-flight denial |
+| `X-RateLimit-Limit` | Maximum requests the route bucket admits at once |
+| `X-RateLimit-Remaining` | Requests still admitted by the route bucket |
+| `X-RateLimit-Reset` | Unix seconds when the whole route bucket is available again |
+| `X-RateLimit-Reset-After` | Seconds until the whole route bucket is available |
+| `X-RateLimit-Bucket` | Stable 16-character bucket identifier |
+| `X-RateLimit-Scope` | `user`, `shared`, or `global` on a denial |
+| `X-RateLimit-Global` | `true` on a global denial |
+
+Successful responses include rate-limit headers only when the credential resolves to a bot, or when the request has no account and the route is a token webhook route. Do not depend on their presence.
+
+### 2.6 Errors
+
+Every HTTP API and Admin API failure uses one envelope:
+
+```json
+{
+  "code": "MISSING_PERMISSIONS",
+  "message": "You do not have permission to do this."
+}
+```
+
+Rules:
+
+- **Match `code`, never `message`.** `message` is localised and can change wording without notice.
+- An HTTP status alone is not enough; many codes share one status.
+- A validation failure uses status `400` and adds an `errors` array. Each element has `path`, `message`, and optionally a stable `code`. `path` is dot-joined, such as `embeds.0.title`; a top-level failure uses `root`.
+- A rate-limit denial adds `global` and `retry_after`.
+- A missing OAuth2 scope adds `required_scope`.
+- An OAuth2 protocol failure at the OAuth2 resource uses the RFC 6749 shape `{ "error": "...", "error_description": "..." }` instead of this envelope.
+
+Status fallbacks when no specific code is registered:
+
+| Status | Fallback code |
+| --- | --- |
+| 400 | `BAD_REQUEST` |
+| 403 | `FORBIDDEN` |
+| 404 | `NOT_FOUND` |
+| 405 | `METHOD_NOT_ALLOWED` |
+| 409 | `CONFLICT` |
+| 410 | `GONE` |
+| 500 | `INTERNAL_SERVER_ERROR` |
+| 501 | `NOT_IMPLEMENTED` |
+| 502 | `BAD_GATEWAY` |
+| 503 | `SERVICE_UNAVAILABLE` |
+| 504 | `GATEWAY_TIMEOUT` |
+| other | `GENERAL_ERROR` |
+
+Authentication rules:
+
+- `401 UNAUTHORIZED` means the credential is missing, malformed, unknown, expired, or revoked.
+- `403 ACCESS_DENIED` means the credential is valid but the operation is not allowed for that identity, or the operation does not accept that credential type.
+- A bot cannot use a user-only operation. It receives `403 ACCESS_DENIED`.
+- A user-only Authentication operation that resolves a bot account returns `403 BOT_USER_AUTH_ENDPOINT_ACCESS_DENIED`.
+- Repeated bad credentials or malformed requests can trigger an IP ban. A temporary ban returns `403 GLOBAL_IP_TEMPORARILY_BANNED` for 24 hours. Stop retrying a rejected credential.
+
+### 2.7 Rate limits
+
+Micup uses a per-route leaky bucket plus one global bucket.
+
+- Authenticated requests are keyed by account and credential kind. A bot token, a user session, an OAuth2 bearer application, and an Admin API key each draw separate allowances.
+- Unauthenticated requests are keyed by client IP, exactly for IPv4 and by `/64` for IPv6.
+- The default global allowance is **50 requests per second**. Accounts with `HIGH_GLOBAL_RATE_LIMIT` get 1,200 requests per second. `RATE_LIMIT_BYPASS` exempts an account from route and global buckets.
+- Some operations enforce additional in-handler limits that `RATE_LIMIT_BYPASS` does not exempt.
+- Every bucket drains continuously; a client can retry as soon as enough capacity has refilled.
+- A denial is `429` with:
+
+```json
+{
+  "code": "RATE_LIMITED",
+  "message": "You're being rate limited.",
+  "global": false,
+  "retry_after": 0.428
+}
+```
+
+- `retry_after` is the delay before one further request is admitted. `X-RateLimit-Reset` reports when the bucket is completely full again; the two instants differ.
+- On a **global** denial of a non-bot user session, Micup revokes the session token before writing the 429. Bot tokens, OAuth2 access tokens, and Admin API keys are not revoked this way. A route-bucket denial never revokes a credential.
+- A 429 can hide a 401 or 403; check `code` before refreshing credentials.
+- Read `Retry-After` or `retry_after` and wait. Do not retry a denied request in a loop.
+
+### 2.8 Deployment limits
+
+Limits are **not constants**. Read the `limits` object in discovery and evaluate its rules for the account and guild context.
+
+Important defaults and floors:
+
+| Limit | Default / floor |
+| --- | --- |
+| `max_message_length` | 2,000 characters; a bot or webhook author gets at least 4,000 |
+| `max_embeds_per_message` | 10 |
+| `max_attachments_per_message` | 10 |
+| Application commands per scope | 100 |
+| Options per command or subcommand | 25 |
+| Choices per option | 25 |
+| Serialised command size | 32,768 bytes |
+| Serialised command set | 524,288 bytes |
+| Bulk delete messages | 1–100 per request |
+| Action rows per message | 5 |
+| Buttons per action row | 5 |
+| Stickers per message | 3 |
+
+`limits.rules` is an ordered list of rules. Clients start from each key's default, evaluate rules from least specific to most specific, and replace or raise values as the document describes. The server still applies its own authoritative bound on each request.
+
+### 2.9 OpenAPI
+
+`GET /v1/openapi.json` returns the deployment's OpenAPI 3.1 document. It had **402 paths** and **894 component schemas** at verification time. Its server URL is the deployment's `api_client` endpoint followed by `/v1`; every path is relative to that URL.
+
+Use the OpenAPI document as the final authority for field names, request bodies, status codes, and operation IDs. This reference explains the protocol; OpenAPI enumerates the routes.
+
+---
+
+## 3. Authentication and credentials
+
+### 3.1 Credential schemes
+
+| Value | Name | Accepted on |
+| --- | --- | --- |
+| `Bot <token>` | Bot token | Bot REST operations |
+| `Bearer <token>` | OAuth2 access token | Operations that explicitly opt into OAuth2, with the required scope |
+| `<token>` | User session token | User operations; sent with **no** scheme prefix |
+| `Admin <token>` | Admin API key | Routes below `/v1/admin` only |
+
+Credential namespaces are distinct. A bot token cannot be used as an OAuth2 bearer, a session token cannot be used as a bot token, and an upload capability or signed media path is not an API credential.
+
+Scheme prefixes are case-sensitive, with two exceptions: `GET /v1/gateway/bot` and `GET /v1/applications/@me` accept case-insensitive prefixes. `GET /v1/applications/@me` requires `Bot` specifically.
+
+### 3.2 Bot tokens
+
+Format:
+
+```text
+<application_id>.<secret>
+```
+
+- `application_id` is a decimal snowflake.
+- `secret` is 32 random bytes encoded as base64url.
+- The full token is returned only by application creation and bot-token reset.
+- A preview cannot authenticate.
+- Rotating a bot token immediately invalidates the old token and **ends every Gateway session the bot holds**.
+- A bot token is **not** bounded by the 100-session-per-user limit; it is bounded by the guild ceiling and Gateway admission rules.
+
+Use it on REST:
+
+```http
+Authorization: Bot 1557753609842589699.D3f...
+```
+
+Use it on the Gateway **without** the prefix:
+
+```json
+{
+  "op": 2,
+  "d": {
+    "token": "1557753609842589699.D3f...",
+    "properties": {"os": "Linux", "browser": "my-bot", "device": "server"}
+  }
+}
+```
+
+### 3.3 User session tokens
+
+A user session token authenticates an ordinary account. It is issued by login, registration, or session exchange and is sent **raw**:
+
+```http
+Authorization: flx_...
+```
+
+A value of `Bearer flx_` followed by 36 alphanumerics is also treated as a user session token. This is an exception, not the general rule.
+
+User session tokens are for user-only routes. A bot must not use one, and a bot token cannot call a user-only route.
+
+### 3.4 OAuth2 access tokens
+
+An OAuth2 access token belongs to an account and is limited by its scopes. Use `Bearer <token>`.
+
+- Only operations that explicitly support OAuth2 accept a bearer token.
+- A missing scope returns `403 MISSING_OAUTH_SCOPE` with `required_scope`.
+- A bearer-only operation rejects a session token, bot token, or Admin key with `401 UNAUTHORIZED`.
+- Access tokens live **7 days** (604,800 seconds). Refresh tokens live **30 days**.
+- A refresh consumes the presented refresh token and rotates the pair. If the response is lost, restart the authorization code grant.
+- Only `authorization_code` and `refresh_token` grants exist. There is no `client_credentials` grant and no token unbound from a user.
+
+### 3.5 Admin API keys
+
+Admin API keys authenticate as their creator on routes below `/v1/admin`. Permissions are the intersection of the key's ACLs and the creator's ACLs. An admin request also requires the account's `admin:authenticate` ACL or a wildcard.
+
+Bots cannot use the Admin API. This reference does not document its routes.
+
+### 3.6 Sudo mode
+
+Sudo mode is a short-lived proof that the account recently re-verified a credential.
+
+- The proof is valid for **5 minutes**.
+- Present it in `X-Fluxer-Sudo-Mode-JWT`.
+- An invalid, expired, or account-mismatched token behaves like a missing one.
+- Micup issues a token only to an account with a TOTP secret or a registered WebAuthn credential. A password-only account re-verifies per operation.
+- A bot account satisfies sudo mode immediately.
+- Revoking the session that obtained a proof does not revoke the proof before it expires.
+
+Sudo mode is irrelevant to ordinary bot messaging. It matters for sensitive application and account operations.
+
+### 3.7 Gateway authentication
+
+- Send the raw bot or user token in `Identify`.
+- Do **not** send an `Authorization` header on the Gateway.
+- An invalid or revoked token closes with `4004` and reason `Invalid token`.
+- A missing `token` closes with `4002` and reason `Invalid identify payload`.
+- `GET /v1/gateway/bot` checks only the token's shape. A 200 does not prove the token is valid.
+
+### 3.8 Credential safety
+
+- Treat every bot token, client secret, webhook token, interaction token, upload capability, and signed media URL as a bearer credential.
+- Never log, echo, commit, or send these values to third parties.
+- Never put an `Authorization` credential in a URL.
+- A webhook execution URL is a secret for its whole lifetime.
+- An interaction token can answer, edit, and delete that interaction's responses for 15 minutes with no other credential.
+- A signed media URL can be read by anyone who holds it until it expires.
+- Use TLS. Rotate a bot token immediately after any suspected exposure.
+
+---
+
+## 4. Applications, bots, and OAuth2
+
+### 4.1 Create an application
+
+In the Micup web app:
+
+1. Open **Ayarlar → Uygulamalar** (Settings → Applications).
+2. Choose **Uygulama oluştur** (Create application).
+3. Enter a name. Micup creates the application and its bot account together.
+4. Copy the **bot token** immediately. It is shown once.
+5. Optionally set the bot's username, avatar, banner, and bio under the application's bot settings.
+6. Use the **OAuth2 URL builder** to create an invite link with `scope=bot` and the permissions you need.
+
+The same operation over REST:
+
+```http
+POST /v1/oauth2/applications
+Authorization: <user session token>
+Content-Type: application/json
+
+{
+  "name": "My Micup Bot",
+  "redirect_uris": ["https://example.com/callback"],
+  "bot_public": true,
+  "bot_require_code_grant": false
+}
+```
+
+Rules:
+
+- The caller must be a claimed account: it needs a password or a linked SSO identity. An unclaimed account returns `400 UNCLAIMED_ACCOUNT_CANNOT_CREATE_APPLICATIONS`.
+- A user can own at most **25 applications**.
+- The route is limited to **10 creations per hour per user**.
+- A CAPTCHA may be required.
+- `redirect_uris` accepts at most **10** absolute URIs. HTTPS is required except for `localhost`, `.localhost`, IPv4 literals, and bracketed IPv6 literals.
+- The response contains the application, the initial `client_secret`, and the bot object with its `token`.
+- A blocked name or redirect URI returns `403 CONTENT_BLOCKED`.
+- No bot username may be allocatable; that returns `500 BOT_USER_GENERATION_FAILED`.
+
+The bot account:
+
+- ID equals the application ID.
+- Username is 1–32 ASCII letters, digits, or underscores.
+- Discriminator is always four decimal digits.
+- Starts with no avatar, banner, bio, or global display name.
+- Gets the animated avatar and animated banner entitlements automatically.
+- Supports two bot flags:
+
+| Value | Flag | Meaning |
+| --- | --- | --- |
+| `16` (`1 << 4`) | `FRIENDLY_BOT` | Accepts friend requests |
+| `32` (`1 << 5`) | `FRIENDLY_BOT_MANUAL_APPROVAL` | Requires manual approval for friend requests |
+
+### 4.2 Application and bot routes
+
+| Method and path | Credential | Purpose |
+| --- | --- | --- |
+| `GET /v1/users/@me/applications` | User | List owned applications |
+| `POST /v1/oauth2/applications` | User | Create application and bot |
+| `GET /v1/oauth2/applications/{id}` | Owner user | Read one application |
+| `PATCH /v1/oauth2/applications/{id}` | Owner user | Update name, redirect URIs, public-bot settings |
+| `DELETE /v1/oauth2/applications/{id}` | Owner user + sudo | Delete the application |
+| `GET /v1/oauth2/applications/@me` | Bot | Read the application that owns the token |
+| `GET /v1/applications/@me` | Bot (`Bot` required) | Read the bot application |
+| `GET /v1/oauth2/applications/{id}/public` | None | Read the public application card |
+| `PATCH /v1/oauth2/applications/{id}/bot` | Owner user | Update bot profile |
+| `POST /v1/oauth2/applications/{id}/bot/reset-token` | Owner user + MFA/sudo | Rotate the bot token |
+| `POST /v1/oauth2/applications/{id}/client-secret/reset` | Owner user + MFA/sudo | Rotate the client secret |
+| `GET /v1/instance/bot-catalog` | None | List official and verified community bots |
+
+`GET /v1/instance/bot-catalog` returns two sections:
+
+- `micup`: official bots, in the same order and with the same invite permissions as `features.official_apps` in discovery.
+- `community`: public, verified, non-deleted, non-disabled, non-banned community bots, in the operator's order.
+
+The route supports `ETag` / `If-None-Match` and is limited to 60 requests per minute.
+
+### 4.3 Invite a bot
+
+Browser invite URL:
+
+```text
+https://micup.gg/oauth2/authorize?client_id=APPLICATION_ID&scope=bot&permissions=3072
+```
+
+Pre-select a guild and hide the guild picker:
+
+```text
+https://micup.gg/oauth2/authorize?client_id=APPLICATION_ID&scope=bot&permissions=3072&guild_id=GUILD_ID&disable_guild_select=true
+```
+
+- `permissions` is a **decimal** permission mask, not a hex value.
+- `scope=bot` installs the bot. There is no `applications.commands` scope.
+- The inviter needs permission to manage the guild and grant the requested permissions.
+- The bot must be a guild member before it can read or write there.
+- Do not put the bot token in an invite URL.
+- `bot_public=true` lets any eligible user install the bot. `bot_public=false` restricts installation to the owner.
+- `bot_require_code_grant=true` requires the OAuth2 authorization code flow before installation.
+
+A minimal invite needs only:
+
+| Permission | Bit | Decimal |
+| --- | --- | --- |
+| `VIEW_CHANNEL` | `1 << 10` | 1,024 |
+| `SEND_MESSAGES` | `1 << 11` | 2,048 |
+| Combined | | **3,072** |
+
+### 4.4 OAuth2 scopes
+
+| Scope | Grants |
+| --- | --- |
+| `identify` | Read the authorized user's identity; required for `GET /v1/oauth2/userinfo` and the reduced bearer form of `GET /v1/users/@me` |
+| `email` | Include the user's email address and verification state; only meaningful together with `identify` |
+| `guilds` | Read the user's guild list and guild details |
+| `connections` | Read the user's connections |
+| `bot` | Install the application's bot into a guild or group DM; grants no bearer access by itself |
+
+An unrecognized scope is rejected when the authorization request is completed. A repeated scope is granted once. Compare scopes as a set, never by order.
+
+### 4.5 Authorization code grant
+
+1. Send the user to the authorization endpoint:
+
+```text
+GET https://micup.gg/api/v1/oauth2/authorize
+  ?client_id=APPLICATION_ID
+  &response_type=code
+  &scope=identify%20guilds
+  &redirect_uri=https%3A%2F%2Fexample.com%2Fcallback
+  &state=RANDOM_STATE
+  &code_challenge=PKCE_CHALLENGE
+  &code_challenge_method=S256
+```
+
+2. The user approves. Micup redirects to the registered `redirect_uri` with `code` and the unchanged `state`.
+3. Exchange the code:
+
+```http
+POST https://micup.gg/api/v1/oauth2/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=authorization_code
+&code=AUTHORIZATION_CODE
+&redirect_uri=https%3A%2F%2Fexample.com%2Fcallback
+&client_id=APPLICATION_ID
+&client_secret=CLIENT_SECRET
+&code_verifier=PKCE_VERIFIER
+```
+
+4. The response is:
+
+```json
+{
+  "access_token": "...",
+  "token_type": "Bearer",
+  "expires_in": 604800,
+  "refresh_token": "...",
+  "scope": "identify guilds"
+}
+```
+
+5. Refresh:
+
+```http
+POST https://micup.gg/api/v1/oauth2/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=refresh_token
+&refresh_token=REFRESH_TOKEN
+&client_id=APPLICATION_ID
+&client_secret=CLIENT_SECRET
+```
+
+Details that matter:
+
+- Authorization codes are single-use and expire after **10 minutes**.
+- `redirect_uri` must match the URI recorded on the code exactly, including trailing slash and encoding.
+- Client authentication uses HTTP Basic or the `client_id` / `client_secret` form fields. Supplying both is accepted on the token route.
+- PKCE is supported with `S256` or `plain`. If the code has a challenge, the verifier is required.
+- A refresh consumes the presented refresh token and rotates the pair. Old access tokens remain valid until they expire.
+- A replayed code, an expired code, a wrong redirect URI, or a wrong verifier returns an OAuth2 `invalid_grant`.
+- An unknown application or wrong secret returns `invalid_client`.
+- `client_credentials` is not supported.
+
+Read the user:
+
+```http
+GET /v1/oauth2/userinfo
+Authorization: Bearer ACCESS_TOKEN
+```
+
+Requires `identify`. The `email` scope adds `email` and `verified`. The response includes `sub` and `id` (both the user's snowflake), `username`, `discriminator`, `global_name`, `avatar`, `flags`, `avatar_color`, `bot`, and `system`.
+
+Read the current authorization:
+
+```http
+GET /v1/oauth2/@me
+Authorization: Bearer ACCESS_TOKEN
+```
+
+List or revoke the user's authorized applications:
+
+```text
+GET    /v1/oauth2/@me/authorizations
+DELETE /v1/oauth2/@me/authorizations/{applicationId}
+POST   /v1/oauth2/@me/authorizations/revoke
+```
+
+Revoke a token:
+
+```text
+POST /v1/oauth2/token/revoke
+```
+
+Introspect a token (client credentials required):
+
+```text
+POST /v1/oauth2/introspect
+```
+
+### 4.6 OAuth2 error shape
+
+An OAuth2 protocol failure uses RFC 6749 fields, not the ordinary API error envelope:
+
+```json
+{
+  "error": "invalid_grant",
+  "error_description": "The authorization code is invalid or expired."
+}
+```
+
+Common values: `invalid_request`, `invalid_client`, `invalid_grant`, `unauthorized_client`, `unsupported_grant_type`, `invalid_scope`.
+
+### 4.7 Application error quick reference
+
+| Status | Code | Cause |
+| --- | --- | --- |
+| 400 | `CAPTCHA_REQUIRED` | No CAPTCHA token on a gated operation |
+| 400 | `INVALID_CAPTCHA` | Rejected CAPTCHA token |
+| 400 | `MAX_APPLICATIONS` | The owner already has 25 applications |
+| 400 | `UNCLAIMED_ACCOUNT_CANNOT_CREATE_APPLICATIONS` | The account is not claimed |
+| 401 | `INVALID_TOKEN` | The bot token does not resolve to an application |
+| 403 | `ACCESS_DENIED` | Wrong credential type or not the owner |
+| 403 | `CONTENT_BLOCKED` | The name, redirect URI, or derived bot name is blocked |
+| 404 | `UNKNOWN_APPLICATION` | No such application |
+| 500 | `BOT_USER_GENERATION_FAILED` | No bot username could be allocated |
+
+---
+
+## 5. HTTP API usage
+
+### 5.1 Base URL and version
+
+```text
+GET https://micup.gg/.well-known/fluxer
+```
+
+Read `endpoints.api_public`. Then call:
+
+```text
+{endpoints.api_public}/v1/...
+```
+
+`/v1` is the only HTTP API version. `endpoints.api` and `endpoints.api_client` are aliases for the first-party client; bots and third-party clients use `api_public`.
+
+Do not derive a base URL from the web app origin. A deployment can serve the API from a different host, scheme, port, or path prefix.
+
+### 5.2 Request bodies
+
+- JSON: `Content-Type: application/json`.
+- OAuth2 forms: `application/x-www-form-urlencoded` or `multipart/form-data`.
+- Message and webhook multipart: include `payload_json` and `files[n]`.
+
+Multipart message fields:
+
+| Field | Meaning |
+| --- | --- |
+| `payload_json` | JSON object with the complete message request payload; absent means `{}` |
+| `files[n]` | A file at zero-based index `n`; `n` is also the attachment `id` in `payload_json.attachments` |
+| `content`, `nonce`, `tts`, `flags`, `favorite_meme_id`, `sticker_ids` | Plain form fields on a multipart message; each overrides the same member in `payload_json` |
+
+Rules:
+
+- The index `n` is at most 10,000 and below the deployment's `max_attachments_per_message`.
+- `files[n]` indices are attachment IDs, not part order.
+- A metadata entry with a `filename` but no matching file fails with `NO_FILE_FOR_ATTACHMENT_METADATA`.
+- Two metadata entries claiming one index fail with `DUPLICATE_ATTACHMENT_IDS_NOT_ALLOWED`.
+- A supplied file that no metadata entry claims is still attached, using its index as the attachment ID.
+- The legacy field names `file` and `fileN` are accepted.
+
+### 5.3 Messages require a visible payload
+
+A message must contain at least one of:
+
+- visible `content`,
+- an embed,
+- an attachment,
+- a favourite meme,
+- a sticker.
+
+Otherwise the request fails with `400 CANNOT_SEND_EMPTY_MESSAGE`.
+
+### 5.4 Reusing a nonce
+
+A message `nonce` is echoed on the created message and its `MESSAGE_CREATE` Dispatch. It is remembered for the authenticated identity for five minutes. Reusing the same nonce in the same channel inside that window returns the message the first request created; reusing it in a different channel returns `404 UNKNOWN_MESSAGE`. The replay check runs after authorisation and body validation, so an otherwise invalid retry still fails, and a retry after the window creates a second message. Use a nonce for retry-safe sends.
+
+### 5.5 Error handling recipe
+
+```text
+if response.status == 401:
+    # Credential is missing, malformed, expired, or revoked.
+    # Do not retry blindly. Verify the token and rotate if needed.
+elif response.status == 403:
+    # Read body.code:
+    # ACCESS_DENIED / MISSING_PERMISSIONS / MISSING_ACCESS /
+    # COMMUNICATION_DISABLED / ACCOUNT_LIMITED / ...
+elif response.status == 404:
+    # Unknown path or resource. Check the route and the channel/guild ID.
+elif response.status == 429:
+    wait(response.body.retry_after or Retry-After)
+    retry once
+elif response.status >= 500:
+    wait(Retry-After or exponential backoff)
+    retry with jitter, at most a few times
+else:
+    surface body.code and body.message to the operator
+```
+
+Never retry `400`, `401`, `403`, or `404` unchanged.
+
+### 5.6 Selected HTTP route map
+
+This is a bot-oriented map, not the complete route list. The full set is in the OpenAPI document and the live documentation.
+
+**Applications and OAuth2**
+
+```text
+POST   /v1/oauth2/applications
+GET    /v1/users/@me/applications
+GET    /v1/oauth2/applications/{id}
+PATCH  /v1/oauth2/applications/{id}
+DELETE /v1/oauth2/applications/{id}
+GET    /v1/oauth2/applications/{id}/public
+PATCH  /v1/oauth2/applications/{id}/bot
+POST   /v1/oauth2/applications/{id}/bot/reset-token
+POST   /v1/oauth2/applications/{id}/client-secret/reset
+GET    /v1/applications/@me
+GET    /v1/gateway/bot
+GET    /v1/oauth2/authorize
+POST   /v1/oauth2/authorize/consent
+POST   /v1/oauth2/token
+POST   /v1/oauth2/token/revoke
+POST   /v1/oauth2/introspect
+GET    /v1/oauth2/userinfo
+GET    /v1/oauth2/@me
+```
+
+**Guilds, channels, members, roles**
+
+```text
+GET    /v1/users/@me/guilds
+GET    /v1/guilds/{guild_id}
+PATCH  /v1/guilds/{guild_id}
+DELETE /v1/users/@me/guilds/{guild_id}
+GET    /v1/guilds/{guild_id}/channels
+POST   /v1/guilds/{guild_id}/channels
+PATCH  /v1/guilds/{guild_id}/channels
+GET    /v1/channels/{channel_id}
+PATCH  /v1/channels/{channel_id}
+DELETE /v1/channels/{channel_id}
+PUT    /v1/channels/{channel_id}/permissions/{overwrite_id}
+DELETE /v1/channels/{channel_id}/permissions/{overwrite_id}
+GET    /v1/guilds/{guild_id}/members
+GET    /v1/guilds/{guild_id}/members/{user_id}
+PATCH  /v1/guilds/{guild_id}/members/{user_id}
+DELETE /v1/guilds/{guild_id}/members/{user_id}
+PUT    /v1/guilds/{guild_id}/members/{user_id}/roles/{role_id}
+DELETE /v1/guilds/{guild_id}/members/{user_id}/roles/{role_id}
+GET    /v1/guilds/{guild_id}/roles
+POST   /v1/guilds/{guild_id}/roles
+PATCH  /v1/guilds/{guild_id}/roles/{role_id}
+DELETE /v1/guilds/{guild_id}/roles/{role_id}
+GET    /v1/guilds/{guild_id}/bans
+PUT    /v1/guilds/{guild_id}/bans/{user_id}
+DELETE /v1/guilds/{guild_id}/bans/{user_id}
+GET    /v1/guilds/{guild_id}/invites
+POST   /v1/channels/{channel_id}/invites
+DELETE /v1/invites/{invite_code}
+GET    /v1/guilds/{guild_id}/audit-logs
+```
+
+**Messages**
+
+```text
+GET    /v1/channels/{channel_id}/messages
+POST   /v1/channels/{channel_id}/messages
+GET    /v1/channels/{channel_id}/messages/{message_id}
+PATCH  /v1/channels/{channel_id}/messages/{message_id}
+DELETE /v1/channels/{channel_id}/messages/{message_id}
+POST   /v1/channels/{channel_id}/messages/bulk-delete
+POST   /v1/channels/{channel_id}/messages/{message_id}/crosspost
+POST   /v1/channels/{channel_id}/typing
+GET    /v1/channels/{channel_id}/messages/pins
+PUT    /v1/channels/{channel_id}/pins/{message_id}
+DELETE /v1/channels/{channel_id}/pins/{message_id}
+PUT    /v1/channels/{channel_id}/messages/{message_id}/reactions/{emoji}/@me
+DELETE /v1/channels/{channel_id}/messages/{message_id}/reactions/{emoji}/@me
+DELETE /v1/channels/{channel_id}/messages/{message_id}/reactions/{emoji}
+DELETE /v1/channels/{channel_id}/messages/{message_id}/reactions
+POST   /v1/channels/{channel_id}/attachments
+POST   /v1/channels/{channel_id}/attachments/complete
+POST   /v1/attachments/refresh-urls
+```
+
+**Application commands and interactions**
+
+```text
+GET    /v1/applications/{application_id}/commands
+PUT    /v1/applications/{application_id}/commands
+POST   /v1/applications/{application_id}/commands
+DELETE /v1/applications/{application_id}/commands
+GET    /v1/applications/{application_id}/commands/{command_id}
+PATCH  /v1/applications/{application_id}/commands/{command_id}
+DELETE /v1/applications/{application_id}/commands/{command_id}
+GET    /v1/applications/{application_id}/guilds/{guild_id}/commands
+PUT    /v1/applications/{application_id}/guilds/{guild_id}/commands
+POST   /v1/applications/{application_id}/guilds/{guild_id}/commands
+DELETE /v1/applications/{application_id}/guilds/{guild_id}/commands
+POST   /v1/interactions/{interaction_id}/{interaction_token}/callback
+POST   /v1/interactions/{interaction_id}/followups
+GET    /v1/interactions/{interaction_id}
+GET    /v1/interactions/{interaction_id}/response
+POST   /v1/interactions
+```
+
+`POST /v1/interactions` invokes a bot command as a **user**; it is not how a bot receives interactions. Bots receive interactions on the Gateway.
+
+**Webhooks**
+
+```text
+GET    /v1/guilds/{guild_id}/webhooks
+GET    /v1/channels/{channel_id}/webhooks
+POST   /v1/channels/{channel_id}/webhooks
+GET    /v1/webhooks/{webhook_id}
+PATCH  /v1/webhooks/{webhook_id}
+DELETE /v1/webhooks/{webhook_id}
+GET    /v1/webhooks/{webhook_id}/{token}
+PATCH  /v1/webhooks/{webhook_id}/{token}
+DELETE /v1/webhooks/{webhook_id}/{token}
+POST   /v1/webhooks/{webhook_id}/{token}
+GET    /v1/webhooks/{webhook_id}/{token}/messages/{message_id}
+PATCH  /v1/webhooks/{webhook_id}/{token}/messages/{message_id}
+DELETE /v1/webhooks/{webhook_id}/{token}/messages/{message_id}
+POST   /v1/webhooks/{webhook_id}/{token}/github
+POST   /v1/webhooks/{webhook_id}/{token}/slack
+POST   /v1/webhooks/{webhook_id}/{token}/instatus
+```
+
+### 5.7 Pagination
+
+Collection endpoints that page over snowflake-ordered resources accept `before`, `after`, or `around`. The operation defines which cursors it supports, whether they are mutually exclusive, the result order, and how `limit` applies. Use the returned IDs as the next cursor; do not compute cursors from timestamps unless the endpoint documents that use.
+
+### 5.8 Admin API
+
+The Admin API lives below `/v1/admin` and uses `Admin <key>`. It is for instance operators only. Bot tokens are rejected. Its ACLs, audit requirements, and routes are outside this reference; see <https://micup.gg/docs/admin-api/>.
+---
+
+## 6. Guilds, channels, roles, and permissions
+
+### 6.1 Guilds
+
+A **guild** is a community with channels, roles, members, and configuration. The Micup UI often calls it a **community** or **server**; the API field is always `guild`.
+
+A guild object can contain:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `id` | snowflake | Guild ID |
+| `name` | string | Guild name, 1–100 characters |
+| `icon` | ?string | Icon hash |
+| `banner` | ?string | Banner hash; null without the `BANNER` feature |
+| `banner_width`, `banner_height` | ?integer | Banner dimensions |
+| `splash`, `embed_splash` | ?string | Invite splash hashes |
+| `vanity_url_code` | ?string | Custom invite code |
+| `owner_id` | snowflake | Owner user ID |
+| `system_channel_id` | ?snowflake | Channel for system messages |
+| `system_channel_flags` | integer | System message switches |
+| `rules_channel_id` | ?snowflake | Rules channel |
+| `afk_channel_id` | ?snowflake | AFK voice channel |
+| `afk_timeout` | integer | AFK timeout in seconds, 60–3600 |
+| `features` | array[string] | Guild feature names |
+| `verification_level` | integer | Membership verification level |
+| `mfa_level` | integer | MFA requirement for elevated actions |
+| `nsfw_level` | integer | Derived from `nsfw` |
+| `nsfw` | boolean | Adult-content guild |
+| `content_warning_level` | integer | Guild content-warning level |
+| `content_warning_text` | ?string | Custom warning text, max 200 characters |
+| `explicit_content_filter` | integer | Explicit-content filter level |
+| `default_message_notifications` | integer | Notification default |
+| `message_history_cutoff` | ?ISO8601 timestamp | Earliest message visible without `READ_MESSAGE_HISTORY` |
+| `permissions` | decimal string | Caller's computed guild permissions, when returned |
+| `roles` | array[role] | Roles, when returned |
+| `channels` | array[channel] | Visible channels, when returned |
+| `member_count`, `online_count` | integer | Counts held by the Gateway |
+| `premium_tier` | integer | Boost level, 0–3 |
+| `premium_subscription_count` | integer | Active boosts |
+
+Guild features that affect behavior include `DISCOVERABLE`, `PARTNERED`, `VERIFIED`, `VIP_VOICE`, `ANIMATED_ICON`, `ANIMATED_BANNER`, `BANNER`, `INVITE_SPLASH`, `RAID_DETECTED`, `VISIONARY`, `EXPRESSION_PURGE_ALLOWED`, `UNAVAILABLE_HIDDEN`, `UNAVAILABLE_FOR_EVERYONE`, and `UNAVAILABLE_FOR_EVERYONE_BUT_STAFF`.
+
+### 6.2 Channel types
+
+| Value | Type | Meaning |
+| --- | --- | --- |
+| `0` | `GUILD_TEXT` | Guild text channel |
+| `1` | `DM` | One-to-one direct message |
+| `2` | `GUILD_VOICE` | Guild voice channel; also has text messages, pins, and slowmode |
+| `3` | `GROUP_DM` | Group direct message |
+| `4` | `GUILD_CATEGORY` | Category; owns no parent and no messages |
+| `5` | `GUILD_ANNOUNCEMENT` | Announcement channel whose messages can be published to followers |
+| `998` | `GUILD_LINK` | Link channel with a destination URL and no messages |
+| `999` | `DM_PERSONAL_NOTES` | Personal notes channel |
+
+A message can be created in a text-bearing channel: `GUILD_TEXT`, `GUILD_VOICE`, `GUILD_ANNOUNCEMENT`, `DM`, `GROUP_DM`, and personal notes. A category and a link channel cannot hold messages.
+
+A guild channel object has `permission_overwrites`; a DM has `recipients`; a group DM can have `name`, `icon`, `owner_id`, and `nicks`. A guild voice channel has `bitrate`, `user_limit`, `voice_connection_limit`, `rtc_region`, and optional `room_theme`.
+
+### 6.3 Permission bits
+
+Permissions are an unsigned 64-bit mask. On the wire, every permission field is a **decimal string**. Request fields also accept a JSON number that is a safe integer. The maximum accepted value is `9223372036854775807`.
+
+| Bit | Name | Decimal | Grants |
+| --- | --- | ---: | --- |
+| `1 << 0` | `CREATE_INSTANT_INVITE` | 1 | Create guild channel invites |
+| `1 << 1` | `KICK_MEMBERS` | 2 | Remove members |
+| `1 << 2` | `BAN_MEMBERS` | 4 | Create and revoke bans |
+| `1 << 3` | `ADMINISTRATOR` | 8 | Every permission; bypasses channel overwrites |
+| `1 << 4` | `MANAGE_CHANNELS` | 16 | Create, modify, reorder, and delete channels |
+| `1 << 5` | `MANAGE_GUILD` | 32 | Modify guild settings and guild-level resources |
+| `1 << 6` | `ADD_REACTIONS` | 64 | Add reactions |
+| `1 << 7` | `VIEW_AUDIT_LOG` | 128 | Read the audit log |
+| `1 << 8` | `PRIORITY_SPEAKER` | 256 | Priority speaker; client-evaluated |
+| `1 << 9` | `STREAM` | 512 | Publish camera and screen share |
+| `1 << 10` | `VIEW_CHANNEL` | 1,024 | View a channel |
+| `1 << 11` | `SEND_MESSAGES` | 2,048 | Send messages and publish own announcements |
+| `1 << 12` | `SEND_TTS_MESSAGES` | 4,096 | Request TTS playback |
+| `1 << 13` | `MANAGE_MESSAGES` | 8,192 | Delete/edit others' messages, bulk delete, remove reactions |
+| `1 << 14` | `EMBED_LINKS` | 16,384 | Have links expanded into embeds |
+| `1 << 15` | `ATTACH_FILES` | 32,768 | Attach files |
+| `1 << 16` | `READ_MESSAGE_HISTORY` | 65,536 | Read messages before the history cutoff |
+| `1 << 17` | `MENTION_EVERYONE` | 131,072 | Use `@everyone` and `@here` |
+| `1 << 18` | `USE_EXTERNAL_EMOJIS` | 262,144 | Use another guild's emoji |
+| `1 << 20` | `CONNECT` | 1,048,576 | Connect to voice |
+| `1 << 21` | `SPEAK` | 2,097,152 | Transmit audio |
+| `1 << 22` | `MUTE_MEMBERS` | 4,194,304 | Moderator-mute members |
+| `1 << 23` | `DEAFEN_MEMBERS` | 8,388,608 | Moderator-deafen members |
+| `1 << 24` | `MOVE_MEMBERS` | 16,777,216 | Move or disconnect voice members |
+| `1 << 25` | `USE_VAD` | 33,554,432 | Use voice activity detection; client-evaluated |
+| `1 << 26` | `CHANGE_NICKNAME` | 67,108,864 | Change own nickname |
+| `1 << 27` | `MANAGE_NICKNAMES` | 134,217,728 | Change others' nicknames |
+| `1 << 28` | `MANAGE_ROLES` | 268,435,456 | Manage roles and channel overwrites |
+| `1 << 29` | `MANAGE_WEBHOOKS` | 536,870,912 | Manage webhooks and follow announcements |
+| `1 << 30` | `MANAGE_EXPRESSIONS` | 1,073,741,824 | Modify/delete others' emojis and stickers |
+| `1 << 37` | `USE_EXTERNAL_STICKERS` | 137,438,953,472 | Use another guild's stickers |
+| `1 << 40` | `MODERATE_MEMBERS` | 1,099,511,627,776 | Apply/clear communication timeouts |
+| `1 << 43` | `CREATE_EXPRESSIONS` | 8,796,093,022,208 | Create expressions; manage own |
+| `1 << 51` | `PIN_MESSAGES` | 2,251,799,813,685,248 | Pin and unpin messages |
+| `1 << 52` | `BYPASS_SLOWMODE` | 4,503,599,627,370,496 | Send without waiting for slowmode |
+| `1 << 53` | `UPDATE_RTC_REGION` | 9,007,199,254,740,992 | Change a voice channel's region |
+| `1 << 54` | `VIEW_CHANNEL_MEMBERS` | 18,014,398,509,481,984 | View a channel's member list |
+
+Bits `19`, `31`–`36`, `38`, `39`, `41`, `42`, `44`–`50`, and `55`–`63` are unassigned and are discarded from writes.
+
+`ADMINISTRATOR` grants the complete 64-bit mask and skips channel overwrites. Removing `ADMINISTRATOR` from every role is the only way to restrict such a member.
+
+`VIEW_CHANNEL_MEMBERS` is feature-gated. A write must declare `view_channel_members_permission` in the `X-Fluxer-Features` header; otherwise the bit keeps its stored value. On role creation, supplying `permissions` without the feature always clears the bit.
+
+### 6.4 Permission computation
+
+1. The guild owner receives the complete mask.
+2. A non-member receives an empty mask.
+3. Start with the `@everyone` role's permissions. The everyone role ID equals the guild ID.
+4. Union the permissions of every role assigned to the member.
+5. If `ADMINISTRATOR` is present, return the complete mask and stop.
+6. If a channel was named, apply its overwrites in this order:
+   - `@everyone` overwrite: remove denied bits, then add allowed bits.
+   - Union of the member's role overwrites: remove all denied bits, then add all allowed bits. An allow on one role defeats a deny on another.
+   - Member overwrite: remove denied bits, then add allowed bits.
+
+A category is visible when at least one child channel is visible. A live voice connection grants **virtual access** to its channel when a role or overwrite change would otherwise hide it; virtual access also grants `SPEAK` and `STREAM` there and ends when the connection ends.
+
+### 6.5 Communication timeouts
+
+A communication timeout does **not** change the permission mask. It is a separate precondition. While `communication_disabled_until` is in the future, these fail with `403 COMMUNICATION_DISABLED`:
+
+- sending a message,
+- editing the caller's own message,
+- publishing the caller's own announcement,
+- adding a reaction,
+- requesting an attachment upload,
+- starting a typing indicator,
+- changing the caller's own nickname.
+
+A timeout has no effect in a private channel. A client that gates its UI on the permission mask must also compare `communication_disabled_until` to the current time.
+
+### 6.6 Role hierarchy
+
+- Roles are ranked by `position`; higher ranks first.
+- Ties are broken by snowflake; the lower snowflake ranks first.
+- A member's rank is their highest assigned role.
+- A member with no role ranks below every role.
+- A caller manages a role only when the caller's rank is **strictly above** the target role's rank.
+- The guild owner manages every role.
+- The `@everyone` role is always position `0` and is never a valid position or hoist-position target.
+- `MANAGE_ROLES` alone is not enough; hierarchy is enforced separately.
+- A non-owner cannot grant a permission they do not hold. The whole request fails with `MISSING_PERMISSIONS`.
+- A role with `managed_kind: "booster"` is managed by the system; deleting it or assigning it by hand returns `MISSING_PERMISSIONS`.
+
+Role object key fields: `id`, `name`, `color` (RGB integer), `color_secondary?`, `icon_emoji_id?`, `position`, `hoist_position?`, `permissions` (decimal string), `hoist`, `mentionable`, `unicode_emoji?`, `managed_kind?`.
+
+### 6.7 Elevated permissions and MFA
+
+These are elevated:
+
+`KICK_MEMBERS`, `BAN_MEMBERS`, `ADMINISTRATOR`, `MANAGE_CHANNELS`, `MANAGE_GUILD`, `MANAGE_MESSAGES`, `MANAGE_ROLES`, `MANAGE_WEBHOOKS`, `MODERATE_MEMBERS`.
+
+In a guild whose `mfa_level` is elevated, a non-owner without an enrolled authenticator receives `400 TWO_FACTOR_REQUIRED` after the permission check passes. The reported mask still contains the elevated bit; hide the action in the UI based on the guild MFA level and the account's enrollment state.
+
+### 6.8 Guild and channel routes
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /v1/users/@me/guilds` | List the caller's guilds |
+| `GET /v1/guilds/{guild_id}` | Get a guild |
+| `PATCH /v1/guilds/{guild_id}` | Modify a guild |
+| `DELETE /v1/users/@me/guilds/{guild_id}` | Leave a guild |
+| `POST /v1/guilds/{guild_id}/delete` | Delete a guild (owner) |
+| `GET /v1/guilds/{guild_id}/channels` | List channels |
+| `POST /v1/guilds/{guild_id}/channels` | Create a channel |
+| `PATCH /v1/guilds/{guild_id}/channels` | Reorder channels |
+| `GET /v1/channels/{channel_id}` | Get a channel |
+| `PATCH /v1/channels/{channel_id}` | Modify a channel |
+| `DELETE /v1/channels/{channel_id}` | Delete or leave a channel |
+| `PUT /v1/channels/{channel_id}/permissions/{overwrite_id}` | Create/update an overwrite |
+| `DELETE /v1/channels/{channel_id}/permissions/{overwrite_id}` | Delete an overwrite |
+| `GET /v1/guilds/{guild_id}/members` | List members |
+| `GET /v1/guilds/{guild_id}/members/{user_id}` | Get a member |
+| `PATCH /v1/guilds/{guild_id}/members/{user_id}` | Modify a member, including timeout and voice move |
+| `DELETE /v1/guilds/{guild_id}/members/{user_id}` | Kick a member |
+| `PUT /v1/guilds/{guild_id}/members/{user_id}/roles/{role_id}` | Add a role |
+| `DELETE /v1/guilds/{guild_id}/members/{user_id}/roles/{role_id}` | Remove a role |
+| `GET /v1/guilds/{guild_id}/roles` | List roles |
+| `POST /v1/guilds/{guild_id}/roles` | Create a role |
+| `PATCH /v1/guilds/{guild_id}/roles/{role_id}` | Modify a role |
+| `DELETE /v1/guilds/{guild_id}/roles/{role_id}` | Delete a role |
+| `GET /v1/guilds/{guild_id}/bans` | List bans |
+| `PUT /v1/guilds/{guild_id}/bans/{user_id}` | Ban a user |
+| `DELETE /v1/guilds/{guild_id}/bans/{user_id}` | Revoke a ban |
+| `GET /v1/guilds/{guild_id}/invites` | List guild invites |
+| `POST /v1/channels/{channel_id}/invites` | Create an invite |
+| `GET /v1/invites/{invite_code}` | Get an invite |
+| `DELETE /v1/invites/{invite_code}` | Delete an invite |
+| `GET /v1/guilds/{guild_id}/audit-logs` | Read the audit log |
+
+Moderation notes:
+
+- A kick requires `KICK_MEMBERS`.
+- A ban requires `BAN_MEMBERS`. The ban body can include `delete_message_seconds` where the route supports it.
+- A timeout is `PATCH /v1/guilds/{guild_id}/members/{user_id}` with `communication_disabled_until` set to an ISO timestamp or `null`. It requires `MODERATE_MEMBERS`.
+- A voice move or disconnect uses the same member PATCH with `channel_id`, and requires `MOVE_MEMBERS`.
+- Moderation requests accept `X-Audit-Log-Reason` where the operation records an audit entry.
+- The bot needs its own role hierarchy and permissions; the caller's permission does not substitute for the bot's.
+
+### 6.9 Common guild and channel errors
+
+| Status | Code | Meaning |
+| --- | --- | --- |
+| 403 | `MISSING_PERMISSIONS` | Caller lacks the required permission |
+| 403 | `MISSING_ACCESS` | Caller cannot access the guild or resource |
+| 403 | `ACCESS_DENIED` | Credential type is not allowed |
+| 403 | `COMMUNICATION_DISABLED` | Member is timed out |
+| 403 | `UNKNOWN_GUILD` disguised as 404 | Guild does not exist |
+| 404 | `UNKNOWN_CHANNEL` | Channel does not exist or is not visible |
+| 404 | `UNKNOWN_USER` | User does not exist |
+| 400 | `INVALID_CHANNEL_TYPE` | Operation does not apply to this channel type |
+| 400 | `TWO_FACTOR_REQUIRED` | Elevated action requires MFA |
+
+---
+
+## 7. Messages
+
+### 7.1 Message object
+
+A message object includes at least:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `id` | snowflake | Message ID |
+| `channel_id` | snowflake | Channel ID |
+| `guild_id?` | snowflake | Guild ID, absent in a DM |
+| `author` | user | Author |
+| `member?` | guild member | Author's guild member state |
+| `content` | string | Text |
+| `timestamp` | ISO8601 | Creation time |
+| `edited_timestamp` | ?ISO8601 | Last edit time |
+| `tts` | boolean | TTS requested |
+| `mention_everyone` | boolean | Active `@everyone`/`@here` |
+| `mentions` | array[user] | Mentioned users |
+| `mention_roles` | array[snowflake] | Mentioned role IDs |
+| `attachments` | array[attachment] | Files |
+| `embeds` | array[embed] | Embeds |
+| `reactions?` | array[reaction] | Reaction summaries |
+| `nonce?` | string | Caller nonce |
+| `pinned` | boolean | Pinned |
+| `webhook_id?` | snowflake | Webhook author |
+| `type` | integer | Message type |
+| `flags` | integer | Message flags |
+| `components?` | array[component] | Buttons and selects |
+| `message_reference?` | object | Reply/forward reference |
+| `referenced_message?` | ?message | Replied-to message |
+| `message_snapshots?` | array | Forward snapshots |
+| `sticker_items?` | array | Stickers |
+| `thread?` | channel | Associated thread |
+
+A message may have `content`, embeds, attachments, stickers, or a favourite meme, but not none.
+
+### 7.2 Message types
+
+| Value | Type | Notes |
+| --- | --- | --- |
+| `0` | `DEFAULT` | Ordinary message |
+| `1` | `RECIPIENT_ADD` | Group DM recipient added |
+| `2` | `RECIPIENT_REMOVE` | Group DM recipient removed |
+| `3` | `CALL` | Call system message |
+| `4` | `CHANNEL_NAME_CHANGE` | Channel renamed |
+| `5` | `CHANNEL_ICON_CHANGE` | Channel icon changed |
+| `6` | `CHANNEL_PINNED_MESSAGE` | Pin system message |
+| `7` | `USER_JOIN` | User joined |
+| `12` | `CHANNEL_FOLLOW_ADD` | Channel started following an announcement channel |
+| `19` | `REPLY` | Reply message |
+
+Only `DEFAULT` and `REPLY` can be modified, pinned, unpinned, or used as a reply target. Only `DEFAULT`, `CHANNEL_PINNED_MESSAGE`, `USER_JOIN`, `CHANNEL_FOLLOW_ADD`, and `REPLY` can be deleted.
+
+### 7.3 Message flags
+
+| Bit | Value | Name | Sendable? |
+| --- | ---: | --- | --- |
+| `1 << 0` | 1 | `CROSSPOSTED` | Server-set |
+| `1 << 1` | 2 | `IS_CROSSPOST` | Server-set |
+| `1 << 2` | 4 | `SUPPRESS_EMBEDS` | Yes |
+| `1 << 3` | 8 | `SOURCE_MESSAGE_DELETED` | Server-set |
+| `1 << 12` | 4,096 | `SUPPRESS_NOTIFICATIONS` | Yes |
+| `1 << 13` | 8,192 | `VOICE_MESSAGE` | Yes |
+| `1 << 15` | 32,768 | `IS_COMPONENTS_V2` | Bots only; currently feature-gated off |
+
+`EPHEMERAL` (`1 << 6`, 64) is **not** a message flag. It exists only on an interaction response's `flags` field.
+
+A create masks the supplied flags down to the sendable set and silently drops every other bit. A modify replaces only the sendable bits and leaves other stored bits untouched.
+
+### 7.4 Create a message
+
+```http
+POST /v1/channels/{channel_id}/messages
+Authorization: Bot <token>
+Content-Type: application/json
+
+{
+  "content": "Merhaba, Micup!",
+  "nonce": "req-001",
+  "tts": false,
+  "embeds": [],
+  "allowed_mentions": {"parse": []}
+}
+```
+
+Body fields:
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `content?` | string | Text; effective limit from discovery |
+| `nonce?` | string \| integer | Idempotency key, 1–32 characters or a safe non-negative integer |
+| `tts?` | boolean | Forced to false without `SEND_TTS_MESSAGES` |
+| `embeds?` | array[embed] | At most `max_embeds_per_message`, default 10 |
+| `attachments?` | array[attachment] | Pre-uploaded attachments |
+| `message_reference?` | object | Reply or forward |
+| `allowed_mentions?` | object | Mention policy |
+| `flags?` | integer | Sendable flags only |
+| `favorite_meme_id?` | snowflake | Copied into a new attachment |
+| `sticker_ids?` | array[snowflake] | At most 3 |
+| `components?` | array[component] | Bots only; gated by feature keys |
+
+Permissions and preconditions:
+
+- Guild channel: `VIEW_CHANNEL` and `SEND_MESSAGES`.
+- Embeds: `EMBED_LINKS`.
+- Attachments: `ATTACH_FILES`.
+- Active everyone mention: `MENTION_EVERYONE`.
+- Favourite meme: both `EMBED_LINKS` and `ATTACH_FILES`.
+- Slowmode applies to non-bots unless the author has `BYPASS_SLOWMODE`.
+- A timed-out member gets `403 COMMUNICATION_DISABLED`.
+- A one-to-one DM may fail with `400 CANNOT_SEND_MESSAGES_TO_USER` due to the recipient's DM policy or relationship state.
+- A new account under a new-conversation limit can get `403 NEW_CONVERSATIONS_LIMITED`.
+- An unclaimed account can send only to its personal notes; otherwise `400 UNCLAIMED_ACCOUNT_CANNOT_SEND_MESSAGES`.
+- A non-bot must have started a session; otherwise `MUST_START_SESSION_BEFORE_SENDING`.
+
+A bot or webhook author gets `max(resolved_max_message_length, 4000)`, so a bot can send at least 4,000 characters even on a deployment whose normal limit is 2,000.
+
+### 7.5 Mentions
+
+`allowed_mentions` controls which mentions written in the text become active:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `parse?` | array[string] | `users`, `roles`, `everyone` |
+| `users?` | array[snowflake] | At most 100 user IDs |
+| `roles?` | array[snowflake] | At most 100 role IDs |
+| `replied_user?` | boolean | Whether a reply mentions the referenced author; default true |
+
+Rules:
+
+- An absent object parses every category.
+- `{}` parses **nothing**. This is the safest default for bot output.
+- A non-empty `parse` cannot be combined with non-empty `users` or `roles`.
+- `mention_everyone` is forced to false when the caller lacks `MENTION_EVERYONE`.
+- `replied_user` is ignored in a one-to-one DM, in personal notes, and when the reply target has the same author.
+
+### 7.6 Embeds
+
+A rich embed input supports:
+
+```json
+{
+  "title": "Release 2.4.0",
+  "description": "Voice reconnects are now instant.",
+  "url": "https://example.com/releases/2.4.0",
+  "timestamp": "2026-10-26T12:00:00.000Z",
+  "color": 5793266,
+  "author": {"name": "Micup", "url": "https://micup.gg", "icon_url": "https://example.com/icon.png"},
+  "thumbnail": {"url": "https://example.com/thumb.png"},
+  "image": {"url": "https://example.com/image.png"},
+  "footer": {"text": "example.com", "icon_url": "https://example.com/icon.png"},
+  "fields": [
+    {"name": "Platform", "value": "Desktop", "inline": true}
+  ]
+}
+```
+
+- A message can hold at most 10 embeds by default.
+- An embed requires `EMBED_LINKS` in a guild.
+- Embed media URLs from the instance are signed by the Media Proxy when returned.
+- A rich embed is stored as type `rich`. Link, image, video, audio, gifv, article, and Bluesky embeds are produced by the unfurler, not accepted as rich input.
+- Do not put an attachment token or temporary signed URL in an embed if you need it to keep working; re-read the message to obtain fresh signed URLs.
+
+### 7.7 Attachments and uploads
+
+There are three attachment paths:
+
+1. **Direct multipart** on message create. Send `payload_json` plus `files[n]`. The file index is the attachment ID.
+2. **Pre-upload then reference.** Request an upload with `POST /v1/channels/{channel_id}/attachments`, upload the bytes, complete with `POST /v1/channels/{channel_id}/attachments/complete`, then send the returned attachment metadata in `attachments`.
+3. **Presigned upload URLs**, when discovery reports `features.presigned_attachment_uploads: true`. Request the upload, PUT the bytes to the returned URL, then reference the attachment.
+
+Attachment rules:
+
+- The deployment's `max_attachments_per_message` defaults to 10.
+- The deployment's `max_attachment_file_size` is in bytes.
+- Every returned attachment URL is a signed Media Proxy URL. It is a bearer capability and expires.
+- Refresh expired signed URLs with `POST /v1/attachments/refresh-urls`.
+- Use the uploaded filename; do not invent a `Content-Type` that contradicts the file.
+- A bot that cannot attach files receives a permission error, not a silent drop.
+
+### 7.8 Reactions
+
+Emoji path parameter forms:
+
+- Unicode emoji: percent-encode the emoji, such as `%F0%9F%91%8D`.
+- Custom emoji: `name:id`, percent-encoded, such as `party%3A1501314428688998182`.
+
+Routes:
+
+```text
+PUT    /v1/channels/{channel_id}/messages/{message_id}/reactions/{emoji}/@me
+DELETE /v1/channels/{channel_id}/messages/{message_id}/reactions/{emoji}/@me
+DELETE /v1/channels/{channel_id}/messages/{message_id}/reactions/{emoji}/{target_id}
+DELETE /v1/channels/{channel_id}/messages/{message_id}/reactions/{emoji}
+DELETE /v1/channels/{channel_id}/messages/{message_id}/reactions
+GET    /v1/channels/{channel_id}/messages/{message_id}/reactions/{emoji}
+GET    /v1/channels/{channel_id}/messages/{message_id}/reactions/{emoji}/users
+```
+
+Adding a reaction requires `ADD_REACTIONS` and access to the message. Removing another user's reaction or all reactions requires `MANAGE_MESSAGES`. A reaction is idempotent for its author: adding the same reaction twice does not create a second count.
+
+### 7.9 Pins, replies, forwards, and bulk deletion
+
+- Pins:
+  - `GET /v1/channels/{channel_id}/messages/pins`
+  - `PUT /v1/channels/{channel_id}/pins/{message_id}`
+  - `DELETE /v1/channels/{channel_id}/pins/{message_id}`
+  - Pinning requires `PIN_MESSAGES`; only `DEFAULT` and `REPLY` messages can be pinned.
+- Reply:
+  - Set `message_reference: {"message_id": "...", "channel_id": "...", "type": 0}`.
+  - A reply mentions its author by default unless `allowed_mentions.replied_user` is false.
+- Forward:
+  - Set `message_reference.type` to `1` and include `channel_id`.
+  - The created message has `message_snapshots` and no `referenced_message`.
+- Bulk delete:
+  - `POST /v1/channels/{channel_id}/messages/bulk-delete` with `message_ids` (1–100).
+  - Requires `MANAGE_MESSAGES` and elevated-MFA compliance.
+  - Deletes matching messages only; unknown IDs are skipped.
+  - Emits one `MESSAGE_DELETE_BULK`.
+
+### 7.10 Common message errors
+
+| Status | Code | Cause |
+| --- | --- | --- |
+| 400 | `CANNOT_SEND_EMPTY_MESSAGE` | No content, embed, attachment, meme, or sticker |
+| 400 | `INVALID_MESSAGE_DATA` | Malformed JSON message body |
+| 400 | `INVALID_FORM_BODY` | Field validation failed; inspect `errors` |
+| 400 | `CANNOT_SEND_MESSAGES_TO_USER` | Recipient's DM policy blocks the send |
+| 400 | `CANNOT_EXECUTE_ON_DM` | Route is guild-only |
+| 403 | `COMMUNICATION_DISABLED` | Author is timed out |
+| 403 | `MISSING_PERMISSIONS` | Missing channel or guild permission |
+| 403 | `NEW_CONVERSATIONS_LIMITED` | New-account DM limit |
+| 403 | `NSFW_CONTENT_AGE_RESTRICTED` | Age check required |
+| 404 | `UNKNOWN_CHANNEL` | Channel not found or not visible |
+| 404 | `UNKNOWN_MESSAGE` | Message not found |
+| 413 | `FILE_SIZE_TOO_LARGE` | Upload exceeds the deployment limit |
+| 429 | `RATE_LIMITED` | Route or global bucket denial |
+
+---
+
+## 8. Application commands and interactions
+
+### 8.1 The interaction model
+
+Micup's interaction model is Discord-shaped but has one important transport difference:
+
+- A person runs a slash command, clicks a button or select menu, types into an autocomplete option, or submits a modal.
+- Micup sends **one** `INTERACTION_CREATE` Dispatch over the Gateway to **exactly one** session of the bot.
+- The bot answers within **3 seconds** by POSTing to the callback route with the interaction token.
+- The bot may edit the original response and send up to **20 followups** for **15 minutes**.
+- There is **no HTTP endpoint that receives interactions**, **no `PING` interaction**, and **no Ed25519 signature verification**.
+
+Delivery is not retried. If no session of the bot is connected, the interaction is not delivered. If the bot misses the 3-second window, the user sees no answer.
+
+### 8.2 Register commands
+
+A command is either **global** or **guild-scoped**.
+
+- A global command works in every guild the bot is in, and in a one-to-one DM when `dm_permission` is true.
+- A guild command works only in that guild and never in a DM.
+- When a guild command and a global command share a name, the guild command hides the global one in that guild.
+- Each scope holds one command set with a version. Every write replaces the set atomically and returns a new `ETag`.
+
+Registration routes:
+
+```text
+GET    /v1/applications/{application_id}/commands
+PUT    /v1/applications/{application_id}/commands
+POST   /v1/applications/{application_id}/commands
+DELETE /v1/applications/{application_id}/commands
+GET    /v1/applications/{application_id}/commands/{command_id}
+PATCH  /v1/applications/{application_id}/commands/{command_id}
+DELETE /v1/applications/{application_id}/commands/{command_id}
+
+GET    /v1/applications/{application_id}/guilds/{guild_id}/commands
+PUT    /v1/applications/{application_id}/guilds/{guild_id}/commands
+POST   /v1/applications/{application_id}/guilds/{guild_id}/commands
+DELETE /v1/applications/{application_id}/guilds/{guild_id}/commands
+GET    /v1/applications/{application_id}/guilds/{guild_id}/commands/{command_id}
+PATCH  /v1/applications/{application_id}/guilds/{guild_id}/commands/{command_id}
+DELETE /v1/applications/{application_id}/guilds/{guild_id}/commands/{command_id}
+```
+
+`PUT` is a **bulk overwrite** and replaces the whole set. `POST` creates one command. The command routes require the application's own bot token; any other credential is refused.
+
+Registration rules:
+
+- A guild command requires the bot to be a member of that guild.
+- `feature_bot_interactions` must be `1` and `feature_bot_interactions_blocked` must be `0`; otherwise every registration route returns `403 APPLICATION_COMMAND_FEATURE_DISABLED`.
+- A request body with a declared length over 540,672 bytes is refused with `413 FILE_SIZE_TOO_LARGE`.
+- `If-Match` is optional. A stale ETag returns `412 APPLICATION_COMMAND_VERSION_CONFLICT`.
+- discord.js and discord.py send neither precondition header, so concurrent writers can conflict.
+
+### 8.3 Command object
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `id` | snowflake | Command ID, kept while the name stays the same |
+| `application_id` | snowflake | Owning application |
+| `version` | snowflake | Changes when the command changes |
+| `guild_id?` | snowflake | Guild for a guild command |
+| `type` | integer | Always `1` (chat input) |
+| `name` | string | Command name |
+| `description` | string | 1–100 characters |
+| `options` | array[option] | Up to 25 |
+| `default_member_permissions` | ?string | Decimal permission mask; null for none |
+| `dm_permission` | boolean | Whether a global command works in a DM with the bot |
+| `contexts?` | array[integer] | `0` guild, `1` DM with the bot, `2` private channels (no effect) |
+
+A command's request body accepts `type`, `name`, `description`, `options`, `default_member_permissions`, and `dm_permission`.
+
+Accepted but discarded for Discord-library compatibility:
+
+- `name_localizations`
+- `description_localizations`
+- `default_permission`
+- `nsfw: false`
+- `integration_types`
+
+Rejected or unsupported:
+
+- `nsfw: true` → `400 INVALID_FORM_BODY`
+- Option type `9` (mentionable) → rejected
+- Option type `11` (attachment) → rejected
+- User-installed applications → not supported
+- Right-click message/user commands → not offered
+- Premium buttons in interaction responses → not offered
+
+`default_member_permissions` only **hides** the command from members who lack the bits. It does not authorize the command. Enforce authorization in the bot.
+
+### 8.4 Command names
+
+- 1–32 Unicode code points after NFC normalization.
+- Lowercase letters of any script, digits, `-`, and `_`.
+- `yardım` and `seviye-ödül` are valid.
+- Uppercase letters and other characters are rejected.
+- Option names, subcommand names, and group names follow the same rules and must be unique among siblings.
+
+### 8.5 Option types
+
+| Value | Type | Notes |
+| --- | --- | --- |
+| `1` | `SUB_COMMAND` | Leaf command |
+| `2` | `SUB_COMMAND_GROUP` | Group of subcommands |
+| `3` | `STRING` | Text; max 6,000 code points |
+| `4` | `INTEGER` | Whole number |
+| `5` | `BOOLEAN` | True/false |
+| `6` | `USER` | Resolved in the interaction |
+| `7` | `CHANNEL` | Resolved in the interaction |
+| `8` | `ROLE` | Resolved in the interaction |
+| `10` | `NUMBER` | Fractional number |
+
+An option can have:
+
+- `required` (default false)
+- up to 25 `choices` for string/integer/number
+- `autocomplete` for string/integer/number
+- `min_value` / `max_value` for integer/number
+- `min_length` / `max_length` for string, 0–6,000
+- up to 25 `channel_types` for a channel option
+- nested `options` for a subcommand or group
+
+Constraints:
+
+- `choices` and `autocomplete` cannot both be set.
+- `min_value` cannot exceed `max_value`.
+- `min_length` cannot exceed `max_length`.
+- Required options come before optional options.
+- A command's options are either all value options or all subcommands/groups.
+- A group holds 1–25 subcommands; a subcommand holds value options; nothing nests deeper.
+- A subcommand has no `required` field.
+
+Limits:
+
+| Limit | Value |
+| --- | --- |
+| Commands per scope | 100 |
+| Options per command or subcommand | 25 |
+| Choices per option | 25 |
+| Serialised command size | 32,768 bytes |
+| Serialised command set | 524,288 bytes |
+
+### 8.6 Example command registration
+
+```http
+PUT /v1/applications/{application_id}/guilds/{guild_id}/commands
+Authorization: Bot <token>
+Content-Type: application/json
+
+[
+  {
+    "name": "yardım",
+    "description": "Komut kategorilerini gösterir",
+    "options": [
+      {
+        "type": 3,
+        "name": "kategori",
+        "description": "Gösterilecek kategori",
+        "required": false,
+        "autocomplete": true
+      }
+    ],
+    "dm_permission": true
+  }
+]
+```
+
+The response is the stored command set. The `ETag` response header identifies its version.
+
+### 8.7 Interaction object
+
+The `d` payload of `INTERACTION_CREATE` contains:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `id` | snowflake | Interaction ID |
+| `application_id` | snowflake | Bot application |
+| `type` | integer | Interaction type |
+| `token` | string | Interaction token; a credential |
+| `version` | integer | Always `1` |
+| `data` | object | Command, component, autocomplete, or modal data |
+| `guild_id?` | snowflake | Guild, absent in a DM |
+| `channel_id` | snowflake | Channel |
+| `channel` | partial channel | Channel representation |
+| `member?` | interaction member | Invoking member in a guild |
+| `user?` | partial user | Invoking user in a DM |
+| `message?` | message | Message whose component was used |
+| `app_permissions` | string | Bot's permissions in the channel |
+| `locale` | string | Invoking user's locale |
+| `guild_locale?` | string | Guild locale |
+| `entitlements` | array | Always empty |
+| `context` | integer | `0` guild, `1` DM with the bot |
+| `attachment_size_limit` | integer | Largest upload in bytes |
+
+The interaction member object adds `permissions` (channel-scoped decimal string) and `flags` (always `0`, kept for Discord libraries).
+
+Interaction types:
+
+| Value | Type | Delivered? |
+| --- | --- | --- |
+| `1` | `PING` | Never |
+| `2` | `APPLICATION_COMMAND` | Yes |
+| `3` | `MESSAGE_COMPONENT` | Yes |
+| `4` | `APPLICATION_COMMAND_AUTOCOMPLETE` | Yes |
+| `5` | `MODAL_SUBMIT` | Yes |
+
+### 8.8 Interaction tokens and timing
+
+- The first response must arrive within **3 seconds** of interaction creation.
+- The token remains usable for **15 minutes** after creation.
+- The token answers only **one first callback**. A second callback returns `409 INTERACTION_TOKEN_CONSUMED`.
+- A callback after 3 seconds returns `410 INTERACTION_EXPIRED`.
+- Up to **20 followups** are allowed.
+- The token is a bearer credential for that interaction. Never log or store it.
+- Micup stores only a SHA-256 hash of its secret part.
+- A started interaction stays answerable for its 15-minute window even if the command is edited or deleted.
+- The bot's membership and permissions are rechecked on every answer.
+
+### 8.9 Callback types
+
+| Value | Type | Purpose |
+| --- | --- | --- |
+| `1` | `PONG` | Registry value; **refused** on the callback route because `PING` is never delivered |
+| `4` | `CHANNEL_MESSAGE_WITH_SOURCE` | Send a message |
+| `5` | `DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE` | Acknowledge and send later |
+| `6` | `DEFERRED_UPDATE_MESSAGE` | Acknowledge a component update without changing it |
+| `7` | `UPDATE_MESSAGE` | Update the message that held the component |
+| `8` | `APPLICATION_COMMAND_AUTOCOMPLETE_RESULT` | Return autocomplete choices |
+| `9` | `MODAL` | Open a modal |
+
+Validity by interaction type:
+
+- Type `4` works for command and component interactions.
+- Type `5` works for command and component interactions.
+- Type `6` works for component interactions.
+- Type `7` works for component interactions.
+- Type `8` works only for autocomplete interactions and cannot be deferred.
+- Type `9` works only as the first answer to a command or component interaction, and requires the bot's `feature_bot_modals` key.
+
+Callback body:
+
+```json
+{
+  "type": 4,
+  "data": {
+    "content": "Merhaba!",
+    "flags": 64,
+    "allowed_mentions": {"parse": []}
+  }
+}
+```
+
+For a deferred response:
+
+```json
+{"type": 5}
+```
+
+Then edit the original response with the interaction token.
+
+### 8.10 Response message object
+
+An interaction response `data` can contain:
+
+- `content`
+- `embeds`
+- `components`
+- `allowed_mentions`
+- `flags`
+- `tts`
+- `attachments`
+- `poll` (where supported by the message schema)
+
+`flags: 64` makes the response **private** (ephemeral):
+
+- Only the invoking user sees it.
+- It is not written to the channel.
+- It does not appear in search, notifications, or unread counts.
+- It is delivered to the invoking session as an `INTERACTION_RESPONSE_CREATE` Dispatch and can be recovered with `GET /v1/interactions/{interaction_id}/response`.
+
+`flags` on an interaction response is not a message flag. It is the private-response mechanism.
+
+### 8.11 Components
+
+Components are written on the bot's own messages through message create, message modify, or an interaction response.
+
+Limits:
+
+- At most **5 action rows** per message.
+- Each action row holds **1–5 buttons**, or **exactly one select menu**.
+- A button label is at most 80 characters.
+- A `custom_id` is 1–100 characters and unique on the message.
+- A bot's edit that omits `components` keeps the stored components.
+
+Component types:
+
+| Value | Type | Placement |
+| --- | --- | --- |
+| `1` | `ACTION_ROW` | Top level |
+| `2` | `BUTTON` | In an action row |
+| `3` | `STRING_SELECT` | Alone in an action row |
+| `4` | `TEXT_INPUT` | In a modal only |
+| `5` | `USER_SELECT` | Alone in an action row |
+| `6` | `ROLE_SELECT` | Alone in an action row |
+| `7` | `MENTIONABLE_SELECT` | Alone in an action row |
+| `8` | `CHANNEL_SELECT` | Alone in an action row |
+| `9` | `SECTION` | Components v2 |
+| `10` | `TEXT_DISPLAY` | Components v2 and modals |
+| `11` | `THUMBNAIL` | Components v2 |
+| `12` | `MEDIA_GALLERY` | Components v2 |
+| `13` | `FILE` | Components v2 |
+| `14` | `SEPARATOR` | Components v2 |
+| `17` | `CONTAINER` | Components v2 |
+| `18` | `LABEL` | Modal only |
+
+Button styles:
+
+| Value | Style | Notes |
+| --- | --- | --- |
+| `1` | `PRIMARY` | Main action |
+| `2` | `SECONDARY` | Secondary action |
+| `3` | `SUCCESS` | Positive action |
+| `4` | `DANGER` | Destructive action |
+| `5` | `LINK` | Opens a URL; no `custom_id` |
+
+A button needs a label or an emoji. A non-link button needs a `custom_id`. A link button needs an `https` or `http` URL, at most 512 characters, with no username or password, and not on the instance blocklist. A click on a link button is not sent to the bot.
+
+Select menus:
+
+- Hold 1–25 options on a string select.
+- `min_values` 0–25, `max_values` 1–25, `min_values <= max_values`.
+- Option values are unique.
+- A returned value must be one of the stored options, or an entity the clicker can see.
+- An invalid value returns `400 INVALID_COMPONENT_VALUE`.
+
+Security:
+
+- `custom_id` and every select value are **untrusted user input**. Validate them like any request parameter.
+- Never put secrets, permissions, or authorization decisions in a `custom_id`.
+- Enforce authorization in the bot. `default_member_permissions` only hides the command.
+- A bot cannot click its own components; the click route returns `403 ACCESS_DENIED` for a bot token. Bots still write components.
+
+### 8.12 Modals
+
+A modal holds **1–5** of these:
+
+| Component | Content |
+| --- | --- |
+| Label (`18`) | A `label` of at most 45 characters, optional `description` of at most 100, and one text input |
+| Action row (`1`) | One text input with its own `label` |
+| Text display (`10`) | Markdown text |
+
+A text input (`4`) has:
+
+- `custom_id`
+- `style`: `1` short or `2` paragraph
+- `min_length` / `max_length` up to 4,000
+- `required`
+- optional prefilled `value`
+- `placeholder` up to 100 characters
+
+Selects and file uploads inside a modal are not offered and fail with `400`.
+
+A modal submit arrives as interaction type `5`. Its `data.components` contains the submitted values. Respond with a normal callback type (for example `4` or `5`) or `7` where applicable.
+
+### 8.13 Autocomplete
+
+- Add `autocomplete: true` to a string, integer, or number option.
+- As the user types, Micup sends interaction type `4`.
+- The focused option's `value` is the raw typed text.
+- Respond within **3 seconds** with callback type `8`.
+- Return at most **25** choices.
+- An autocomplete response cannot be deferred.
+- An option cannot have both `choices` and `autocomplete`.
+
+Example:
+
+```json
+{
+  "type": 8,
+  "data": {
+    "choices": [
+      {"name": "Moderasyon", "value": "mod"},
+      {"name": "Seviye", "value": "seviye"}
+    ]
+  }
+}
+```
+
+### 8.14 Followups
+
+Use the interaction token:
+
+```http
+POST /v1/interactions/{interaction_id}/{interaction_token}/callback
+Content-Type: application/json
+```
+
+Or use the bot-token followup route:
+
+```http
+POST /v1/interactions/{interaction_id}/followups
+Authorization: Bot <token>
+Idempotency-Key: <1-64 printable ASCII characters>
+Content-Type: application/json
+```
+
+The followup route:
+
+- Is bot-only.
+- Requires the interaction to have been answered.
+- Allows at most 20 followups.
+- Returns the created message.
+- Uses `Idempotency-Key`; the same key returns the same message, and reusing a key with a different body returns `409 INTERACTION_NONCE_CONFLICT`.
+- Returns `410 INTERACTION_EXPIRED` after 15 minutes.
+- Returns `503 INTERACTION_OUTCOME_UNKNOWN` when the result cannot be confirmed; retry with the same key.
+
+The built-in callback route also accepts followups without an `Authorization` header, because Discord libraries use it.
+
+### 8.15 Discord library configuration
+
+**discord.js 14**
+
+```js
+import {Client, GatewayIntentBits} from 'discord.js';
+
+const discovery = await (await fetch('https://micup.gg/.well-known/fluxer')).json();
+const api = discovery.endpoints.api_public.replace(/\/$/, '');
+
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds], // Micup ignores intents; this is a client-side choice
+  rest: {api, version: '1'},
+  ws: {version: 1},
+});
+
+client.once('ready', () => console.log(`Logged in as ${client.user.username}`));
+client.login(process.env.MICUP_TOKEN);
+```
+
+- `rest.api` is the **public API base without `/v1`**; discord.js appends `/v1`.
+- `rest.version: '1'` selects `/v1`.
+- `ws.version: 1` appends `v=1` to the Gateway URL.
+- discord.js fetches the Gateway URL with `GET /v1/gateway/bot`.
+- Do not set a Discord CDN base.
+
+**discord.py 2**
+
+```python
+import json
+import os
+import urllib.request
+
+import discord
+import discord.gateway
+import discord.http
+import yarl
+
+TOKEN = os.environ["MICUP_TOKEN"]
+
+with urllib.request.urlopen("https://micup.gg/.well-known/fluxer", timeout=15) as response:
+    API = json.load(response)["endpoints"]["api_public"].rstrip("/")
+
+discord.http.INTERNAL_API_VERSION = 1
+discord.http.Route.BASE = f"{API}/v1"
+
+request = urllib.request.Request(
+    f"{API}/v1/gateway/bot",
+    headers={"Authorization": f"Bot {TOKEN}"},
+)
+with urllib.request.urlopen(request, timeout=15) as response:
+    gateway = json.load(response)["url"]
+
+discord.gateway.DiscordWebSocket.DEFAULT_GATEWAY = yarl.URL(gateway)
+
+client = discord.Client(intents=discord.Intents.default())
+client.run(TOKEN)
+```
+
+Critical: discord.py does **not** discover the Gateway URL. If you do not replace `DiscordWebSocket.DEFAULT_GATEWAY`, it will connect to Discord's Gateway and send the Micup token there. Always set it from `GET /v1/gateway/bot` or discovery.
+
+### 8.16 Differences from Discord
+
+| Topic | Micup behavior |
+| --- | --- |
+| API version | REST `/v1`, Gateway `v=1` |
+| Receiving interactions | Gateway only; no public HTTP endpoint |
+| Interaction signatures | None; no Ed25519, no `PING` |
+| Gateway intents | None; no intent field, no privileged intents |
+| `applications.commands` scope | None; `scope=bot` installs |
+| User-installed apps | Not supported; `integration_types` discarded |
+| Command localization | `name_localizations` / `description_localizations` discarded; default name in every locale |
+| `nsfw: true` commands | Rejected |
+| Right-click commands | Not offered |
+| Attachment option type | Not offered |
+| Mentionable option type | Not offered |
+| Deferred public response | No placeholder message; the first edit of `@original` creates it |
+| Private response | Not written to the channel; only the invoking user sees it |
+| Components v2 | Feature-gated off by default |
+| Premium button | Not offered |
+| Files in interaction responses | Not offered |
+| Files/selects in modals | Not offered |
+| Followup route | Extra bot-token route with `Idempotency-Key` |
+| Command write precondition | `If-Match` optional |
+| Media URLs | Media Proxy, not Discord CDN |
+| Bot invite | `scope=bot`, no `applications.commands` |
+
+### 8.17 Interaction errors
+
+| Status | Code | Cause |
+| --- | --- | --- |
+| 403 | `APPLICATION_COMMAND_FEATURE_DISABLED` | A bot or user feature key is closed |
+| 503 | `APPLICATION_COMMAND_BOT_UNAVAILABLE` | No Gateway session took the interaction |
+| 409 | `APPLICATION_COMMAND_STALE` | The command changed since the client loaded it |
+| 410 | `INTERACTION_EXPIRED` | The 3-second or 15-minute window passed |
+| 409 | `INTERACTION_TOKEN_CONSUMED` | The interaction was already answered |
+| 409 | `INTERACTION_NONCE_CONFLICT` | A nonce or idempotency key was reused with a different body |
+| 503 | `INTERACTION_OUTCOME_UNKNOWN` | The result could not be confirmed; retry with the same key |
+| 400 | `UNSUPPORTED_COMPONENT` | Component type not offered |
+| 400 | `INVALID_COMPONENT_VALUE` | Select value not on the component |
+| 409 | `MODAL_NOT_OPEN` | Modal submit without an open modal |
+| 404 | `UNKNOWN_WEBHOOK` | Interaction token or application ID does not match |
+| 400 | `INVALID_FORM_BODY` | Body validation failed |
+
+Rate limit for interaction callbacks and followups: **5 requests per second per interaction ID**.
+---
+
+## 9. Gateway
+
+The Gateway is one persistent WebSocket. It sends account and guild events and accepts a small set of bounded client commands. Every other read or mutation is an HTTP API operation.
+
+### 9.1 Connecting
+
+1. Read `endpoints.gateway` from `GET /.well-known/fluxer`.
+2. Open a WebSocket with:
+
+```text
+wss://micup.gg/gateway?v=1&encoding=json
+```
+
+Optional compression:
+
+```text
+wss://micup.gg/gateway?v=1&encoding=json&compress=zstd-stream&stream=1
+```
+
+3. Read Opcode `10` `Hello` and take `heartbeat_interval`.
+4. Send Opcode `2` `Identify` with the raw token and `properties`.
+5. Read `READY`, keep `session_id`, and use its sequence for heartbeats.
+6. Send Opcode `1` `Heartbeat` with the last processed Dispatch sequence every `heartbeat_interval` milliseconds.
+
+Connection parameters:
+
+| Parameter | Meaning |
+| --- | --- |
+| `v` | Gateway protocol version; must be `1` |
+| `encoding` | Only `json` is implemented; absent selects JSON |
+| `compress` | `zstd-stream` or `none` |
+| `stream` | `1` or `true` enables the compression stream |
+
+A missing or non-`1` `v` closes with `4012` **before Hello**. Unknown parameters are ignored. An unrecognized `compress` or `stream` value selects no compression and leaves the socket open.
+
+With `compress=zstd-stream&stream=1`, every server frame is binary and every client frame must use the same compressor. Hello is already compressed, so the first inbound frame is binary. Compression is negotiated once per connection; changing it requires a new socket and a new Identify or Resume.
+
+### 9.2 Payload envelope
+
+```json
+{
+  "op": 0,
+  "t": "MESSAGE_CREATE",
+  "s": 42,
+  "d": {}
+}
+```
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `op` | integer | Opcode |
+| `d` | any | Payload; required on client-to-server payloads; opcode-dependent on server-to-client payloads |
+| `s` | integer | Dispatch sequence; only on Dispatch |
+| `t` | string | Event name; only on Dispatch |
+
+A session starts at sequence `0`, so `READY` is sequence `1`. Every live Dispatch advances the sequence. A replayed Dispatch keeps its original sequence and a replay can contain gaps. `RESUMED` carries the current sequence and does not advance it.
+
+### 9.3 Opcodes
+
+| Op | Name | Direction | Purpose |
+| ---: | --- | --- | --- |
+| `0` | Dispatch | Server → client | Named event |
+| `1` | Heartbeat | Bidirectional | Keepalive; server may request an immediate beat with `d: null` |
+| `2` | Identify | Client → server | Start an authenticated session |
+| `3` | Presence Update | Client → server | Replace session presence |
+| `4` | Voice State Update | Client → server | Join, move, update, or leave voice |
+| `5` | Voice Server Ping | Reserved | Never sent; sending it closes the socket |
+| `6` | Resume | Client → server | Restore a retained session |
+| `7` | Reconnect | Server → client | Open a new socket; the current one closes with `4000` |
+| `8` | Request Guild Members | Client → server | Request bounded member chunks |
+| `9` | Invalid Session | Server → client | `d: false`; the session cannot be resumed |
+| `10` | Hello | Server → client | `heartbeat_interval` |
+| `11` | Heartbeat ACK | Server → client | Acknowledges a heartbeat |
+| `12` | Gateway Error | Reserved | Never sent; errors arrive as Dispatches or close frames |
+| `14` | Lazy Request | Client → server | Replace bounded guild subscriptions |
+| `15` | Request Guild Counts | Client → server | Request guild count records |
+| `16` | Request Channel Member Counts | Client → server | Request channel count records |
+
+Opcode `13` and every value above `16` are undefined. An undefined opcode, a server-only opcode sent by a client, or a payload with no `d` closes with `4001` once a session is attached, and with `4003` before authentication. `Identify` with no `d` closes with `4005`.
+
+### 9.4 Identify
+
+```json
+{
+  "op": 2,
+  "d": {
+    "token": "1557753609842589699.D3f...",
+    "properties": {
+      "os": "Linux",
+      "browser": "my-bot",
+      "device": "server"
+    },
+    "presence": {
+      "status": "online",
+      "afk": false,
+      "mobile": false
+    },
+    "ignored_events": ["TYPING_START"],
+    "flags": 2,
+    "shard": [0, 1]
+  }
+}
+```
+
+| Field | Required? | Meaning |
+| --- | --- | --- |
+| `token` | Yes | Raw bot or user token, no `Bot ` prefix |
+| `properties` | Yes | Object with `os`, `browser`, and `device` strings |
+| `presence` | No | Initial presence; null or omitted uses saved status |
+| `ignored_events` | No | Up to 256 Dispatch event names to suppress |
+| `flags` | No | Non-negative session flags bitfield |
+| `initial_guild_id` | No | One guild to join as active without a Lazy Request |
+| `shard` | No | `[shard_id, shard_count]` |
+
+There is **no `intents` field and no intent system**. `Identify` ignores unknown fields. The following close with `4002` and reason `Invalid identify payload`:
+
+- missing `token` or `properties`;
+- `properties` not an object;
+- missing or non-string `os`, `browser`, or `device`;
+- `ignored_events` not an array of strings, or more than 256 entries;
+- `flags` not a non-negative integer.
+
+A malformed `shard` closes with `4010` and reason `Invalid shard`. A bot session that resolves to more than 2,500 guilds after the shard filter closes with `4011` and reason `Sharding required`. A non-bot account with 100 live sessions closes with `4008` and reason `Too many sessions`. A bot credential is not bounded by that count.
+
+Session flags:
+
+| Value | Name | Effect |
+| ---: | --- | --- |
+| `1 << 1` (2) | `DEBOUNCE_MESSAGE_REACTIONS` | Merge runs of reaction additions in a DM/group DM into `MESSAGE_REACTION_ADD_MANY` |
+
+Undefined session-flag bits are accepted and ignored.
+
+`properties` optional hints:
+
+- `e2ee_capable`: whether the client can join end-to-end encrypted voice. A session without it is refused from such a channel with `VOICE_E2EE_REQUIRED`.
+- `mobile`: used when `presence` is absent.
+- `latitude`, `longitude`: decimal strings; used to order `rtc_regions` by distance. Send both or neither. A number fails validation; send `"52.52"`, not `52.52`.
+
+### 9.5 Heartbeats
+
+Hello advertises `heartbeat_interval`, normally **41,250 ms**.
+
+```json
+{"op": 1, "d": 42}
+```
+
+- Before a session exists, the payload is ignored but still acknowledged.
+- After a session exists, `d` is the last processed Dispatch sequence, or `null` before any Dispatch.
+- A `d` that is neither `null` nor an integer closes with `4007` and reason `Invalid sequence`.
+- The server answers with Opcode `11` `Heartbeat ACK`.
+- The server requests an immediate heartbeat with Opcode `1` and `d: null` once 90% of the interval has elapsed since the last acknowledgement. Answer it immediately.
+- If no new acknowledgement is accepted within **45,000 ms**, the socket closes with `4009` and reason `Heartbeat timeout`.
+
+A heartbeat with a sequence trims every retained Dispatch at or below that sequence and records it as acknowledged. A client MUST send the sequence it has actually processed. A later Resume from a lower sequence fails with `4007`.
+
+### 9.6 Resume
+
+```json
+{
+  "op": 6,
+  "d": {
+    "token": "1557753609842589699.D3f...",
+    "session_id": "6f1d0b7c9a2e4f83b5c1d9e7a4f20b13",
+    "seq": 42
+  }
+}
+```
+
+- All fields are required.
+- A missing field, a non-string `token` or `session_id`, or a non-integer `seq` closes with `4002` and reason `Invalid resume payload`.
+- A successful Resume replays every retained Dispatch above `seq`, in order, then sends `RESUMED`.
+- A disconnected session is retained for **60,000 ms**.
+- An accepted `seq` is at most the current sequence and at least the acknowledged sequence. Outside those bounds closes with `4007`.
+- An unknown or expired session, or a `seq` below the replay floor, sends Opcode `9` with `d: false` and leaves the socket unauthenticated.
+- A token that does not own the session closes with `4004` and reason `Invalid token`.
+- Resume is accepted in every open state. A socket that already holds a session still processes Resume and attaches the named session in its place.
+- A socket displaced by a Resume receives Opcode `7` and closes with `4000`.
+
+There is no separate resume URL. Reconnect to the discovered Gateway endpoint.
+
+### 9.7 Sharding
+
+`shard` is `[shard_id, shard_count]`:
+
+- `shard_count` is 1–16,384.
+- `shard_id` is 0 through `shard_count - 1`.
+- An omitted or null value applies no sharding.
+- Guild shard: `((guild_id >> 22) % shard_count)`, computed on the integer value of the guild snowflake.
+- At Identify, the Gateway filters the account's guild list to the shard's guilds.
+- Bot shard with more than 2,500 guilds closes with `4011` and reason `Sharding required`.
+- A user session is never refused for guild count.
+- Shard `0` also receives account-level traffic. A non-zero shard drops every Dispatch that names no guild, except `RATE_LIMITED`, `GUILD_COUNTS_UPDATE`, and `CHANNEL_MEMBER_COUNTS_UPDATE`.
+
+`GET /v1/gateway/bot` reports `shards: 1` as a recommendation, but Identify accepts any valid shard count. Micup has no large-bot tier, no shard alignment requirement, and no Identify concurrency buckets.
+
+### 9.8 Close codes
+
+| Code | Name | Meaning |
+| ---: | --- | --- |
+| `4000` | Unknown error | Drain, unclassified session error, unreachable retained session, or `RESUMED` failure |
+| `4001` | Unknown opcode | Undefined opcode, server opcode from client, or missing `d` |
+| `4002` | Decode error | Bad JSON, bad payload, bad compression, bad command fields, oversized payload |
+| `4003` | Not authenticated | Authenticated command before a session, or Identify timeout |
+| `4004` | Authentication failed | Invalid token, or token does not own the named session |
+| `4005` | Already authenticated | Identify while a session is attached |
+| `4007` | Invalid sequence | Heartbeat or Resume sequence outside accepted bounds |
+| `4008` | Rate limited | Connection, payload, Identify, or session budget exceeded |
+| `4009` | Session timeout | No heartbeat acknowledgement within 45,000 ms |
+| `4010` | Invalid shard | Malformed `[shard_id, shard_count]` |
+| `4011` | Sharding required | More than 2,500 guilds on one bot session |
+| `4012` | Invalid API version | `v` absent or not `1` |
+
+`4006` is unassigned; no code above `4012` is defined. A reconnect with the same token, shard pair, and version reproduces the same failure.
+
+### 9.9 Dispatch events
+
+Event names are literal strings in the `t` field. The live registry:
+
+**Session and current user**
+
+`READY`, `RESUMED`, `SESSIONS_REPLACE`, `AUTH_SESSION_CHANGE`, `RATE_LIMITED`, `USER_UPDATE`, `USER_SETTINGS_UPDATE`, `USER_GUILD_SETTINGS_UPDATE`, `USER_NOTE_UPDATE`, `USER_PINNED_DMS_UPDATE`, `USER_CONNECTIONS_UPDATE`, `WEBAUTHN_CREDENTIALS_UPDATE`, `RELATIONSHIP_ADD`, `RELATIONSHIP_UPDATE`, `RELATIONSHIP_REMOVE`, `SAVED_MESSAGE_CREATE`, `SAVED_MESSAGE_DELETE`, `RECENT_MENTION_DELETE`, `FAVORITE_MEME_CREATE`, `FAVORITE_MEME_UPDATE`, `FAVORITE_MEME_DELETE`, `FEED_NOTIFICATION_ACK`, `FEED_NOTIFICATION_CREATE`, `FOLLOW_CREATE`, `FOLLOW_DELETE`.
+
+**Guilds and channels**
+
+`GUILD_CREATE`, `GUILD_SYNC`, `GUILD_UPDATE`, `GUILD_DELETE`, `GUILD_ROLE_CREATE`, `GUILD_ROLE_UPDATE`, `GUILD_ROLE_UPDATE_BULK`, `GUILD_ROLE_DELETE`, `GUILD_EMOJIS_UPDATE`, `GUILD_STICKERS_UPDATE`, `GUILD_SOUNDBOARD_SOUNDS_UPDATE`, `GUILD_SOUNDBOARD_SOUND_PLAY`, `CHANNEL_CREATE`, `CHANNEL_UPDATE`, `CHANNEL_UPDATE_BULK`, `CHANNEL_DELETE`, `CHANNEL_RECIPIENT_ADD`, `CHANNEL_RECIPIENT_REMOVE`, `WEBHOOKS_UPDATE`, `INVITE_CREATE`, `INVITE_DELETE`.
+
+**Members and moderation**
+
+`GUILD_MEMBER_ADD`, `GUILD_MEMBER_UPDATE`, `GUILD_MEMBER_REMOVE`, `GUILD_MEMBERS_CHUNK`, `GUILD_MEMBER_LIST_UPDATE`, `GUILD_AUDIT_LOG_ENTRY_CREATE`, `GUILD_BAN_ADD`, `GUILD_BAN_REMOVE`, `PRESENCE_UPDATE`, `PRESENCE_UPDATE_BULK`, `PASSIVE_UPDATES`.
+
+**Messages and reactions**
+
+`MESSAGE_CREATE`, `MESSAGE_UPDATE`, `MESSAGE_DELETE`, `MESSAGE_DELETE_BULK`, `MESSAGE_ACK`, `MESSAGE_REACTION_ADD`, `MESSAGE_REACTION_ADD_MANY`, `MESSAGE_REACTION_REMOVE`, `MESSAGE_REACTION_REMOVE_ALL`, `MESSAGE_REACTION_REMOVE_EMOJI`, `TYPING_START`, `CHANNEL_PINS_UPDATE`, `CHANNEL_PINS_ACK`.
+
+**Voice and calls**
+
+`VOICE_STATE_UPDATE`, `VOICE_SERVER_UPDATE`, `ENTRANCE_SOUND_PLAY`, `TABLE_GAME_UPDATE`, `CALL_CREATE`, `CALL_UPDATE`, `CALL_DELETE`.
+
+**Count responses**
+
+`GUILD_COUNTS_UPDATE`, `CHANNEL_MEMBER_COUNTS_UPDATE`.
+
+**Applications and interactions**
+
+`APPLICATION_COMMANDS_UPDATE`, `INTERACTION_CREATE`, `INTERACTION_RESPONSE_CREATE`, `INTERACTION_RESPONSE_UPDATE`, `INTERACTION_RESPONSE_DELETE`.
+
+`READY` key fields:
+
+| Field | Meaning |
+| --- | --- |
+| `session_id` | Resume identifier |
+| `version` | Gateway version, always `1` |
+| `user` | Authenticated account in its private representation |
+| `guilds` | Guilds for the session; bot guilds are unavailable stubs |
+| `private_channels` | DM and group DM channels |
+| `relationships` | The account's relationships |
+| `presences` | Visible presences at connect time |
+| `users` | Referenced users |
+| `sessions` | The account's other live sessions |
+| `read_states` | Per-channel read state |
+| `user_settings` | Account-wide settings |
+| `user_guild_settings` | Per-guild notification settings |
+| `notes`, `pinned_dms`, `favorite_memes` | Account data |
+| `shard` | The accepted shard pair, when one was sent |
+| `application` | The bot application, for a bot session |
+| `interest_onboarding_required?` | `true` when the account must finish the interest picker |
+
+For a bot session, each guild in `READY.guilds` is an unavailable stub, followed by one `GUILD_CREATE` per guild. `GUILD_CREATE` and `GUILD_SYNC` carry the complete roles, channels, emojis, stickers, and voice states for that guild; replace stored lists with them. Every other guild Dispatch changes part of that state.
+
+### 9.10 Event filtering
+
+Micup has **no intents**. Replace an intent mask with these mechanisms:
+
+- `Identify.ignored_events`: suppress up to 256 named Dispatches.
+- `Lazy Request` (op `14`): subscribe to guild member lists and mark guilds active.
+- Guild availability and permissions: the server only sends events the session may see.
+- Sharding: a non-zero shard receives only its guilds' guild-scoped events.
+
+Gates, in order:
+
+1. **Guild availability.** An unavailable guild sends nothing except `GUILD_UPDATE`.
+2. **Permission and visibility.** Channel-scoped and message-access-filtered events go only to sessions that can see the channel or message.
+3. **Guild subscription state.** A passive user session in a guild with more than 250 members receives a reduced set. Bots are never passive.
+4. **Session filters.** The shard filter, then `ignored_events`.
+
+A passive user session in a large guild receives:
+
+- `GUILD_UPDATE`, `GUILD_DELETE`
+- `GUILD_ROLE_UPDATE`, `GUILD_ROLE_UPDATE_BULK`
+- `CHANNEL_CREATE`, `CHANNEL_UPDATE`, `CHANNEL_UPDATE_BULK`, `CHANNEL_DELETE`
+- `GUILD_AUDIT_LOG_ENTRY_CREATE`
+- `PASSIVE_UPDATES`
+- `MESSAGE_CREATE` only when the message mentions the session's user
+- `GUILD_MEMBER_UPDATE`, `GUILD_MEMBER_REMOVE` only for the session's own user
+
+`VOICE_STATE_UPDATE` follows its own path: sessions that can view the channel. `TYPING_START` is decided by the guild's typing subscription.
+
+`Lazy Request` (op `14`) replaces bounded guild subscriptions. It accepts member-list ranges and explicit member IDs; ranges are at most 100,000 with a span of at most 99, and explicit IDs are at most 1,000 per guild. Up to 10 ranges per channel.
+
+### 9.11 Gateway limits
+
+| Limit | Value |
+| --- | --- |
+| Inbound WebSocket message | 4,096 bytes on the wire, and 4,096 bytes after decompression |
+| Compressed message decompressed size | 10 MiB; beyond it closes `4002` |
+| Heartbeat interval | 41,250 ms advertised |
+| Heartbeat timeout | 45,000 ms since last acknowledgement |
+| Session retention after socket drop | 60,000 ms |
+| Presence publish after drop | `offline` after 5,000 ms |
+| Client payloads per socket | 600 in a rolling 60 s |
+| Client payloads per authenticated session | 600 in a fixed 60 s bucket |
+| Client payloads per source IP | 6,000 in a fixed 60 s bucket |
+| Concurrent WebSockets per source IP | 256 |
+| Identify attempts per source IP | 300 per fixed 60 s |
+| Sessions per user | 100 |
+| Bot guilds per shard | 2,500 |
+| Replay buffer | 4,096 Dispatches or 16 MiB, whichever fills first |
+| Single replayed event ceiling | 2 MiB; larger events are delivered but not retained |
+| Presence updates | 5 per rolling 20 s per socket |
+| Voice state updates | 2 per rolling 1 s immediate; later ones queue up to 64 and drain one per 500 ms |
+| Bounded requests in flight | 4 |
+| Bounded request deadline | 10,000 ms |
+| Request Guild Members complete list | One accepted request per guild per 30 s |
+
+Behavior on excess:
+
+- Socket/session/IP payload budget: close `4008` and reason `Rate limited`.
+- More than 256 concurrent sockets from one IP: close `4008` and reason `Too many connections` before Hello.
+- Identify budget exhausted: the payload is discarded with **no reply and no close**. The client must send a new Identify after the budget recovers, before the heartbeat deadline.
+- Presence over budget: discarded without closing.
+- Bounded request with all four slots occupied: dropped with no result and no close.
+- `GUILD_SYNC`, `GUILD_MEMBER_LIST_UPDATE`, and `GUILD_MEMBERS_CHUNK` are never retained for Resume.
+
+### 9.12 Minimal raw Gateway handshake
+
+```js
+const ws = new WebSocket('wss://micup.gg/gateway?v=1&encoding=json');
+
+ws.addEventListener('message', (event) => {
+  const payload = JSON.parse(event.data);
+  if (payload.op === 10) {
+    ws.send(JSON.stringify({
+      op: 2,
+      d: {
+        token: process.env.MICUP_TOKEN,
+        properties: {os: 'linux', browser: 'my-bot', device: 'server'},
+      },
+    }));
+    setInterval(() => ws.send(JSON.stringify({op: 1, d: null})), payload.d.heartbeat_interval);
+  }
+  if (payload.op === 0 && payload.t === 'READY') {
+    console.log('session', payload.d.session_id);
+  }
+  if (payload.op === 0 && payload.t === 'INTERACTION_CREATE') {
+    // Answer within 3 seconds with the interaction token.
+  }
+});
+```
+
+This is illustrative. A production client must track `s`, send the last processed sequence, handle `RECONNECT` and `INVALID_SESSION`, and resume within 60 seconds.
+
+---
+
+## 10. Webhooks
+
+### 10.1 Webhook types
+
+| Value | Type | Meaning |
+| ---: | --- | --- |
+| `1` | `INCOMING` | Posts the messages its token holder sends |
+| `2` | `CHANNEL_FOLLOWER` | Posts copies of messages published in a followed announcement channel |
+
+An incoming webhook belongs to one guild and posts into one guild text, voice, or announcement channel. Its execution token is generated once at creation and **never rotates**. The ID and token pair is a bearer credential for the webhook's lifetime.
+
+A channel follower webhook has no usable token. Every token route returns `404 UNKNOWN_WEBHOOK` for it, so nothing can post through it except Micup itself.
+
+### 10.2 Authorisation
+
+- Execution and token management use the token in the path, not an `Authorization` header.
+- Management routes (`GET/PATCH/DELETE /v1/webhooks/{webhook_id}`) use a bot token and `MANAGE_WEBHOOKS`.
+- Create a webhook with `POST /v1/channels/{channel_id}/webhooks` and `MANAGE_WEBHOOKS`.
+- A webhook can target a guild text, voice, or announcement channel.
+- The webhook token is a secret. Anyone who has the full URL can post, edit, and delete the webhook's messages.
+- A first-party web client `Origin` is refused with `403 INVALID_API_ORIGIN`. Execute webhooks from a server, not from a browser.
+
+### 10.3 Execute a webhook
+
+```http
+POST /v1/webhooks/{webhook_id}/{token}?wait=true
+Content-Type: application/json
+
+{
+  "content": "Build #128 passed",
+  "username": "CI",
+  "allowed_mentions": {"parse": []}
+}
+```
+
+- `wait=true` returns the created message. The exact trimmed values `true`, `True`, and `1` are true; everything else is false.
+- Without `wait`, the response is `204`.
+- JSON and multipart bodies are accepted.
+- A JSON body cannot attach a file. Use `files[n]` in a multipart body.
+- `username` overrides the author name for that message.
+- `avatar_url` overrides the avatar for that message; if it cannot be fetched, the message is created without the override.
+- The stored webhook name and avatar do not change.
+- A webhook message can have `content`, embeds, attachments, stickers, a favourite meme, or a reference, but not none.
+- An **omitted** `allowed_mentions` in a webhook body suppresses every mention, which is the opposite of `Create message`.
+- `nonce` is remembered per webhook for five minutes. A repeat within that window creates no second message and returns the first.
+- Rate limit: 60 requests per minute per caller and webhook, exempt from the global bucket.
+
+### 10.4 Webhook message routes
+
+```text
+GET    /v1/webhooks/{webhook_id}/{token}/messages/{message_id}
+PATCH  /v1/webhooks/{webhook_id}/{token}/messages/{message_id}
+DELETE /v1/webhooks/{webhook_id}/{token}/messages/{message_id}
+```
+
+The token can edit or delete messages the webhook authored. It cannot edit or delete another author's message.
+
+### 10.5 Slack, GitHub, and Instatus
+
+```text
+POST /v1/webhooks/{webhook_id}/{token}/slack
+POST /v1/webhooks/{webhook_id}/{token}/github
+POST /v1/webhooks/{webhook_id}/{token}/instatus
+```
+
+These routes accept the payload shapes of the named service and render them as Micup messages. They are not general-purpose message endpoints; use the base execute route for custom payloads.
+
+### 10.6 Webhook errors
+
+| Status | Code | Cause |
+| --- | --- | --- |
+| 400 | `CANNOT_SEND_EMPTY_MESSAGE` | No visible content, embed, or attachment |
+| 400 | `INVALID_FORM_BODY` | Validation failed; inspect `errors` |
+| 401 | `MISSING_AUTHORIZATION` | Management route without a credential |
+| 403 | `MISSING_PERMISSIONS` | Missing `MANAGE_WEBHOOKS` or channel permission |
+| 403 | `INVALID_API_ORIGIN` | First-party web client origin |
+| 403 | `CONTENT_BLOCKED` | Blocked content |
+| 404 | `UNKNOWN_WEBHOOK` | Webhook/token pair not found |
+| 404 | `UNKNOWN_CHANNEL` | Target channel missing or wrong type |
+| 404 | `UNKNOWN_MESSAGE` | Webhook message not found |
+| 429 | `RATE_LIMITED` | Webhook execution allowance exceeded |
+
+---
+
+## 11. Voice
+
+### 11.1 Transport
+
+Micup runs voice over **LiveKit**. The main Gateway places a session into a voice channel and returns one media credential. The client presents that credential to the LiveKit endpoint and sends every microphone, camera, and screen-share track over that connection.
+
+There is **no voice WebSocket**, **no voice opcode set**, **no UDP discovery step**, and **no separate encryption handshake** published by Micup. Do not invent one.
+
+Room names:
+
+| Surface | Room name |
+| --- | --- |
+| Guild voice channel | `guild_{guild_id}_channel_{channel_id}` |
+| Private call | `dm_channel_{channel_id}` |
+| Participant identity | `user_{user_id}_{connection_id}` |
+
+The grant lives for **600 seconds**.
+
+### 11.2 Placement
+
+Send Opcode `4` `Voice State Update`:
+
+```json
+{
+  "op": 4,
+  "d": {
+    "guild_id": "1501314428688990000",
+    "channel_id": "1501314428688991111",
+    "connection_id": "1730000000000000000",
+    "self_mute": false,
+    "self_deaf": false,
+    "self_video": false,
+    "self_stream": false
+  }
+}
+```
+
+| Shape | Result |
+| --- | --- |
+| `channel_id` and no `connection_id` | Open a new connection |
+| `channel_id` and a `connection_id` | Update or move that connection |
+| `channel_id: null` and a `connection_id` in a guild | Drop that connection |
+| `channel_id: null` and no `connection_id` in a guild | Refused with `VOICE_MISSING_CONNECTION_ID` |
+| `channel_id: null` and no `connection_id` in a call | Drop every voice membership in the session |
+
+The server answers with `VOICE_STATE_UPDATE` for the resulting membership to every session that can view the channel, and `VOICE_SERVER_UPDATE` to the requesting session with:
+
+- `token`
+- `endpoint`
+- `channel_id`
+- `connection_id`
+- `guild_id` (present for a guild channel, omitted for a call)
+- `e2ee_key` when the channel is end-to-end encrypted
+
+A refused placement produces **no Dispatch and no error event**. The client observes only the absence of a grant.
+
+### 11.3 Voice permissions and capacity
+
+| Permission | Effect |
+| --- | --- |
+| `VIEW_CHANNEL` + `CONNECT` | Hold a voice connection |
+| `SPEAK` | Publish audio |
+| `STREAM` | Publish camera and screen share |
+| `MUTE_MEMBERS` | Apply/clear moderator mute |
+| `DEAFEN_MEMBERS` | Apply/clear moderator deafen |
+| `MOVE_MEMBERS` | Move or disconnect a member |
+| `UPDATE_RTC_REGION` | Change the channel region |
+
+Capacity:
+
+| Bound | Refusal |
+| --- | --- |
+| `user_limit` (`0` = unlimited) | `VOICE_CHANNEL_FULL` |
+| `voice_connection_limit` (default 5, max 100) | `VOICE_CONNECTION_LIMIT_REACHED` |
+| 25 members with camera on | `VOICE_CAMERA_USER_LIMIT` |
+
+A timed-out member is refused with `VOICE_MEMBER_TIMED_OUT`. An unclaimed account is refused for a one-to-one DM call and for a guild voice channel it does not own, except a group DM call. A session without `e2ee_capable` is refused from an E2EE channel when every existing connection is capable; a bot is exempt from that check.
+
+### 11.4 Private calls, Go Live, entrance sounds
+
+- A private call is the DM/group DM counterpart of a voice channel. Its room name is `dm_channel_{channel_id}`.
+- Go Live publishes a screen-share track on the voice connection the member already holds. It opens no second connection and issues no second credential.
+- An entrance sound is a short clip announced to everyone already in the channel. It publishes no media track.
+- Voice activity sharing is a user setting that tells friends which voice channel the account is in.
+
+### 11.5 3D rooms, voice seats, and table games
+
+A guild voice channel can have a `room_theme`:
+
+| Theme | Layout |
+| --- | --- |
+| `gece-lounge` | Night lounge, one table `T01`, four watch seats |
+| `kahvehane` | Coffee house, tables `T01`–`T03`, two watch seats each |
+| `oyun-odasi` | Game room, tables `T01`–`T02`, four watch seats each |
+
+The server owns seat assignment. A connection is seated on join, moves or stands when it leaves, and carries its seat as a LiveKit participant attribute.
+
+Voice-seat routes are **user-only**; a bot or OAuth2 bearer credential is refused with `403 ACCESS_DENIED`. 3D rooms and table games are feature-gated and can be off.
+
+Table games:
+
+| Kind | Description |
+| --- | --- |
+| `okey` | Classic Okey, four players, one hand |
+| `okey101` | 101 Okey, four players, one hand, scored |
+| `chess` | Chess, two players at positions 1 and 3 |
+| `dama` | Türk daması, two players |
+| `dama_normal` | Normal dama (Brazilian draughts), two players |
+| `tavla` | Backgammon, no doubling cube, two players |
+
+The server deals, rolls, validates moves, runs clocks, and sends each player only what that player may see. Spectators receive public views with `rack: null`.
+
+Table game routes:
+
+```text
+GET    /v1/channels/{channel_id}/table-games
+GET    /v1/channels/{channel_id}/table-games/{slot}
+POST   /v1/channels/{channel_id}/table-games/{slot}
+PUT    /v1/channels/{channel_id}/table-games/{slot}/players/@me
+DELETE /v1/channels/{channel_id}/table-games/{slot}/players/@me
+POST   /v1/channels/{channel_id}/table-games/{slot}/actions
+PUT    /v1/channels/{channel_id}/table-games/{slot}/spectators/@me
+DELETE /v1/channels/{channel_id}/table-games/{slot}/spectators/@me
+GET    /v1/table-games/rewards
+GET    /v1/table-games/leaderboards/{game}
+GET    /v1/guilds/{guild_id}/table-games/leaderboard
+GET    /v1/users/@me/table-game-ratings
+```
+
+They are user-only. A running ranked game has additional protection: changing the room theme or deleting the channel can return `409 TABLE_GAME_RANKED_IN_PROGRESS`.
+
+### 11.6 Bot voice
+
+A bot is exempt from the E2EE capability check, so a bot session can be placed in voice under the normal permission and capacity rules. Micup does **not** document a bot voice SDK, a server-side audio mixer, or a REST route that publishes audio. A bot that needs voice must implement the LiveKit client side itself using the grant from `VOICE_SERVER_UPDATE`, and must handle Opcode `4` and the `VOICE_STATE_UPDATE` / `VOICE_SERVER_UPDATE` events.
+
+Do not claim that a bot can "join voice" with a single REST call. Placement is a Gateway operation, and media is a LiveKit connection.
+
+---
+
+## 12. Media and uploads
+
+### 12.1 Media Proxy
+
+Take `endpoints.media` from discovery. Live value: `https://media.micup.gg`. Read paths have **no `/v1` prefix**.
+
+| Family | Paths |
+| --- | --- |
+| Attachment | `/attachments/{path}` |
+| Signed external media | `/external/{signature}/{target}` |
+| Theme CSS | `/themes/{path}.css` |
+| Entrance sound | `/entrance-sounds/{user_id}/{filename}` |
+| Image assets | `/avatars`, `/icons`, `/branding`, `/banners`, `/splashes`, `/embed-splashes`, `/emojis`, `/stickers` |
+| Guild member images | `/guilds/{guild_id}/users/{user_id}/avatars`, `/banners` |
+| Static object | `/{key}` on a `static` endpoint |
+| Upload relay | `/v1/relay/{key}` on the relay base |
+
+Public reads do **not** read the `Authorization` header. A stored object is authorised by its path, external media by its signature, and an upload by the capability in its URL.
+
+A signed media URL is a bearer capability. Anyone holding it can read the object until it expires. Do not expose it through redirects, traces, or referrers.
+
+### 12.2 Signed attachment URLs
+
+- Attachment URLs returned in messages, embeds, and feed posts are signed.
+- They expire. The exact lifetime is at most one day from signing for an ordinary signed attachment URL.
+- Re-read the message, post, or attachment to obtain a fresh URL.
+- `POST /v1/attachments/refresh-urls` refreshes a batch of attachment URLs.
+- The `url` and `proxy_url` of a returned attachment are the same signed URL.
+- A data-package URL works until the signing secret is removed.
+
+### 12.3 Upload flows
+
+**Inline multipart** is the simplest path:
+
+```http
+POST /v1/channels/{channel_id}/messages
+Authorization: Bot <token>
+Content-Type: multipart/form-data; boundary=...
+
+--boundary
+Content-Disposition: form-data; name="payload_json"
+Content-Type: application/json
+
+{"content":"Screenshot","attachments":[{"id":0,"filename":"shot.png"}]}
+--boundary
+Content-Disposition: form-data; name="files[0]"; filename="shot.png"
+Content-Type: image/png
+
+<bytes>
+--boundary--
+```
+
+**Pre-upload**:
+
+1. `POST /v1/channels/{channel_id}/attachments` with up to 10 file plans. Each plan declares an ID, filename, exact byte count, and content type.
+2. If `upload_mode` is `singlepart` (at most 10,485,760 bytes), `PUT` the bytes to `upload_url`.
+3. If `upload_mode` is `multipart`, upload each part to its own URL using the returned `part_size` and part numbers, then `POST /v1/channels/{channel_id}/attachments/complete` with each `upload_filename` and `upload_id`.
+4. Send the `upload_filename` in the message's `attachments` array.
+
+Rules:
+
+- Do not send `Authorization` on the upload URL. The URL's capability is the credential.
+- Do not rewrite, decode, reorder, or re-encode the URL.
+- Singlepart URL lifetime: 5 minutes. Multipart part URL: 1 hour. Relay URL: 900 seconds by default.
+- There is no resume. If a capability expires, request a new plan and restart.
+- An upload is bound to the identity and channel that planned it, and its key is single-use.
+- `presigned_attachment_uploads` must be true. If false, use inline multipart.
+- Stream previews use the user-only Streams API, not the attachment flow.
+
+### 12.4 Media errors
+
+The Media Proxy returns a short `text/plain` body, not the API error envelope. Common statuses:
+
+| Status | Meaning |
+| --- | --- |
+| 200 | Object returned |
+| 206 | Partial content for a valid `Range` |
+| 401 | Missing/invalid/expired upload capability |
+| 403 | Signature or origin refused |
+| 404 | Object, route, or mode not found |
+| 413 | Uploaded body exceeds the limit |
+| 416 | Unsatisfiable range |
+| 500 | Upstream storage failure |
+
+`HEAD` is supported on read routes and returns the same status and representation headers with no body.
+
+---
+
+## 13. Micup-specific platform features
+
+These are features of the Micup instance rather than generic Fluxer protocol surfaces. Almost all are **user-only**: they reject bot and OAuth2 bearer credentials with `403 ACCESS_DENIED`. Do not design a third-party bot around calling them.
+
+### 13.1 Official community bots
+
+The live bot catalog lists seven official Micup bots. Two of them have public, documented settings routes and are covered in detail here:
+
+| Bot | Purpose | Invite permission mask |
+| --- | --- | --- |
+| **MicupBOT** | Welcome/goodbye, autorole, reaction roles, message/voice XP, levels, moderation commands, automod | `1099780156480` |
+| **Micup Roster** | Hourly event cards, Join/Leave buttons, voice checks, main/sub rosters | `17910848` |
+
+The same catalog also lists **Micup Mod**, **Micup Rol**, **Micup Destek**, **Micup Çekiliş**, and **Micup Seviye**. They have no documented public settings API here; do not invent routes for them.
+
+Discover the catalog through:
+
+- `features.official_apps` in instance discovery
+- `GET /v1/instance/bot-catalog`
+- `GET /v1/oauth2/applications/{application_id}/public`
+
+Each has its own application ID. MicupBOT and Micup Roster run inside Micup's services without a public bot Gateway session and can appear offline. Their tokens are refused for bot-token authentication.
+
+**MicupBOT configuration** is user-only. Routes:
+
+```text
+GET    /v1/guilds/{guild_id}/micupbot/settings
+PATCH  /v1/guilds/{guild_id}/micupbot/settings
+GET    /v1/guilds/{guild_id}/micupbot/automod
+PUT    /v1/guilds/{guild_id}/micupbot/automod
+GET    /v1/guilds/{guild_id}/micupbot/reaction-roles
+POST   /v1/guilds/{guild_id}/micupbot/reaction-roles
+DELETE /v1/guilds/{guild_id}/micupbot/reaction-roles/{message_id}
+GET    /v1/guilds/{guild_id}/micupbot/level-rewards
+PUT    /v1/guilds/{guild_id}/micupbot/level-rewards
+GET    /v1/guilds/{guild_id}/micupbot/leaderboard
+GET    /v1/guilds/{guild_id}/micupbot/warnings/{user_id}
+DELETE /v1/guilds/{guild_id}/micupbot/warnings/{user_id}
+DELETE /v1/guilds/{guild_id}/micupbot/warnings/{user_id}/{warning_id}
+```
+
+All require a signed-in user and guild membership. The caller needs the documented guild permissions (`MANAGE_GUILD`, sometimes `MANAGE_ROLES`, `MANAGE_MESSAGES`, `MODERATE_MEMBERS`). The instance flag `feature_micupbot` must be enabled; otherwise writes return `403 FEATURE_TEMPORARILY_DISABLED` while reads keep working.
+
+**Micup Roster configuration** is also user-only:
+
+```text
+GET    /v1/guilds/{guild_id}/roster-events
+POST   /v1/guilds/{guild_id}/roster-events
+PATCH  /v1/guilds/{guild_id}/roster-events/{event_id}
+DELETE /v1/guilds/{guild_id}/roster-events/{event_id}
+```
+
+The feature flag is `feature_guild_roster`. Creating or updating an event checks the caller's channel permissions, not just `MANAGE_GUILD`.
+
+### 13.2 Feed
+
+The feed is a social timeline: posts with text, up to four images, a video, or a poll; a home feed of followed accounts; Discover; categories; topics; likes; comments; replies; and notifications.
+
+- Every feed route except the Bunny Stream webhook requires a **user session**.
+- A bot or OAuth2 bearer is refused with `403 ACCESS_DENIED`.
+- `feature_feed` must be enabled; otherwise session routes return `403 FEATURE_TEMPORARILY_DISABLED`.
+- New posts are **not** pushed over the Gateway. Clients read the home feed.
+- A public post can be read by any signed-in account while the author's profile privacy is `EVERYONE`.
+- Video posts use Bunny Stream, TUS upload, encoding, and content scanning. A video becomes a post only after it passes.
+- Polls allow one vote per account; votes cannot be changed.
+
+Key routes:
+
+```text
+GET    /v1/feed/home
+GET    /v1/feed/discover
+GET    /v1/feed/categories
+GET    /v1/feed/topics
+GET    /v1/feed/notifications
+POST   /v1/feed/posts
+GET    /v1/feed/posts/{post_id}
+DELETE /v1/feed/posts/{post_id}
+PUT    /v1/feed/posts/{post_id}/like
+POST   /v1/feed/posts/{post_id}/comments
+GET    /v1/feed/posts/{post_id}/comments
+POST   /v1/feed/posts/{post_id}/comments/{comment_id}/replies
+POST   /v1/feed/views
+```
+
+### 13.3 Shop and premium
+
+The shop sells, through the Payriff payment page, in Azerbaijani manat (AZN):
+
+| SKU | Product |
+| --- | --- |
+| `cosmetic:<item_id>` | Owned cosmetic item |
+| `bundle:<bundle_id>` | Bundle of 2–10 owned items |
+| `premium:1`, `premium:3`, `premium:12` | Premium time |
+| `visionary` | Lifetime premium with a Visionary number |
+| `boost:30` | One boost slot for 30 days |
+| `username:1`, `username:2`, `username:3` | Username card for a 1–3 character username |
+
+- All shop routes are **user-only**, except code previews and payment callbacks.
+- Catalog, quote, and order routes work only on a self-hosted instance in the `mirror` premium mode.
+- Sales switches start off. Both read false while Payriff is unconfigured.
+- The server computes every amount; a client sends only the product.
+- Prices are set in US cents, converted to qəpik at an admin rate, and displayed with an informational TL estimate.
+- Premium has monthly/yearly subscriptions, gifts, and lifetime Visionary.
+- Do not build a bot that buys products or reads another account's orders.
+
+### 13.4 Badges and cosmetics
+
+- Badge inventory is user-only (`GET /v1/users/@me/badges`).
+- A badge is built-in (staff, partner, bug hunter, premium, premium package, premium sequence) or from a catalog.
+- Hiding a badge only changes what other readers see; the account keeps it.
+- Cosmetics include avatar decorations, ultra decorations, profile effects, nameplates, and 3D room character parts.
+- Cosmetic routes are user-only and require no permission.
+
+### 13.5 Referral
+
+- Every account has one personal code: 10 characters from `a`–`z` and `2`–`7`.
+- A referral link is `/r/<code>`.
+- A new account registers with `referral_code`.
+- A referral is `pending`, `valid`, or `rejected`.
+- Rewards are cosmetic items, premium days, or off-site rewards delivered by staff.
+- The programme starts closed. While closed, the route reports `enabled: false` and returns no code.
+- The route is user-only.
+
+### 13.6 Interest onboarding
+
+- A one-time picker of interest cards, grouped by region and category.
+- Choosing an option joins the account to the guilds behind the cards.
+- While an account must finish it, `READY` carries `interest_onboarding_required: true`.
+- The account cannot skip it.
+- Bot and system accounts never get the picker.
+- The routes are user-only:
+
+```text
+GET  /v1/users/@me/interest-onboarding
+POST /v1/users/@me/interest-onboarding
+```
+
+### 13.7 Usernames and tags
+
+- Micup's live deployment uses `tag_style: "none"`.
+- On a `none` deployment, usernames are unique and shown without a tag. Outside an active username migration, every non-bot account has discriminator `0000`; during migration, an account that has not selected a name keeps its nonzero legacy discriminator.
+- Bot accounts always have a four-digit discriminator.
+- The instance may run a username migration. Discovery publishes `username_migration` with `state` (`legacy`, `preparing`, `selecting`), `epoch`, and deadlines.
+- After `forced_at`, an account without a selected username must choose one before the actions listed in the user object.
+- Do not assume Discord's `#1234` tag model. Read `tag_style`.
+
+### 13.8 Guild discovery
+
+Guilds can be listed in Micup's public discovery directory when they have the `DISCOVERABLE` feature. Discovery browsing returns public guild cards with approximate member and presence counts. Previewing a discovery channel and joining a discovery guild are user-only; the rest of the discovery resource accepts a bot token. Listing management is a guild-owner operation, not a bot operation.
+
+### 13.9 What bots cannot do
+
+The following are user-only and return `403 ACCESS_DENIED` to a bot token or OAuth2 bearer:
+
+- MicupBOT and Micup Roster settings
+- Feed reads and writes
+- Table games and voice seats
+- Shop, orders, premium self-service
+- Badges, cosmetics, referrals, interest onboarding
+- User profile, relationships, DMs, settings, read states
+- Calling other bots' interactions (`POST /v1/interactions`)
+- Admin API
+
+A bot can:
+
+- send, edit, delete, pin, and react to messages where it has permission;
+- manage guild resources where it has permission and hierarchy;
+- create and manage webhooks;
+- register commands and answer interactions;
+- read guilds, channels, members, roles, invites, and audit logs it can access;
+- join voice under the normal placement rules, if it implements LiveKit media itself.
+---
+
+## 14. Discord compatibility and migration
+
+### 14.1 Surface mapping
+
+| Discord concept | Micup equivalent | Change required |
+| --- | --- | --- |
+| `https://discord.com/api/v10` | `endpoints.api_public` + `/v1` | Discover the base |
+| `wss://gateway.discord.gg` | `endpoints.gateway` + `?v=1&encoding=json` | Discover the base and set `v=1` |
+| `Authorization: Bot ...` | Same | Keep |
+| Intents and privileged intents | None | Remove intent assumptions |
+| HTTP interactions endpoint + Ed25519 | Gateway `INTERACTION_CREATE` | Replace the web server |
+| `applications.commands` scope | None | Use `scope=bot` |
+| User-installable apps | None | Remove `integration_types` |
+| Discord CDN | Media Proxy | Use returned URLs |
+| `#1234` discriminators | `tag_style`-dependent | Read discovery |
+| Message components | Same type numbers | Works, subject to feature keys |
+| Modals | Same type numbers | Works, subject to feature keys |
+| Components v2 | Feature-gated off by default | Do not rely on it |
+| Premium buttons | Not offered | Remove |
+| Files in interaction responses | Not offered | Use followups or a normal message |
+| Attachment command option | Not offered | Use a string URL or upload flow |
+
+### 14.2 Migration checklist
+
+1. Replace every Discord host with a value from `GET /.well-known/fluxer`.
+2. Set REST version to `1` and Gateway `v` to `1`.
+3. Set the bot `Authorization` header to `Bot <token>`.
+4. For discord.py, replace `DiscordWebSocket.DEFAULT_GATEWAY`; it does not discover.
+5. Remove all `intents`/privileged-intent logic. Use `ignored_events` and `Lazy Request` instead.
+6. Remove the HTTP interactions listener, public-key verification, and `PING` response.
+7. Register commands with the bot token; invite the bot with `scope=bot` and no `applications.commands`.
+8. Replace Discord CDN URLs with the Media Proxy URLs returned by the API.
+9. Treat every snowflake as a string.
+10. Re-check permissions against Micup's bit table. `STREAM` is `1 << 9`; `VIEW_CHANNEL_MEMBERS` is `1 << 54` and feature-gated.
+11. Re-check message length and attachment limits from discovery.
+12. Re-check interaction timing: 3 seconds, 15 minutes, 20 followups.
+13. Re-check component availability: buttons and selects are open; Components v2 is not.
+14. Test 401, 403, 404, 429, 4004, 4011, and `INTERACTION_EXPIRED` paths.
+15. Remove any token from source, logs, and URLs. Rotate it if it was exposed.
+
+### 14.3 Library quirks
+
+| Library | Quirk | Fix |
+| --- | --- | --- |
+| discord.js 14 | `rest.api` must be the base **without** `/v1` | Pass `discovery.endpoints.api_public` |
+| discord.js 14 | It fetches the Gateway URL from `/v1/gateway/bot` | Ensure the token is valid |
+| discord.js 14 | It still requires client-side intents | Provide the bits for the events you handle; Micup ignores the field |
+| discord.py 2 | It does not discover the Gateway URL | Set `DiscordWebSocket.DEFAULT_GATEWAY` |
+| discord.py 2 | It uses `Route.BASE` for REST | Set it to `{api_public}/v1` |
+| discord.py 2 | It may send `with_response=1` | Micup supports it |
+| Any library | It may assume Discord CDN | Replace asset URL builders |
+| Any library | It may assume `applications.commands` | Remove that scope from invites |
+
+### 14.4 What works unchanged
+
+- Slash command payload shapes for types 1–8 and 10.
+- Buttons, link buttons, string/user/role/mentionable/channel selects.
+- Modals with text inputs.
+- Ephemeral responses via `flags: 64`.
+- Message embeds, attachments, reactions, pins, and replies.
+- Guild, channel, role, member, invite, and webhook concepts.
+- Discord.js and discord.py command builders.
+
+### 14.5 What does not work
+
+- Gateway intents and privileged-intent approval.
+- Receiving interactions over HTTP.
+- Ed25519 request verification.
+- `PING` interactions.
+- User-installable applications.
+- `applications.commands` scope.
+- Context menu (right-click) commands.
+- Mentionable and attachment command option types.
+- Components v2 by default.
+- Premium buttons.
+- Files in interaction responses.
+- Files or select menus inside modals.
+
+---
+
+## 15. Error and troubleshooting guide
+
+### 15.1 Status semantics
+
+| Status | Meaning | Safe action |
+| --- | --- | --- |
+| `200` / `201` / `204` | Success | Continue |
+| `304` | Not modified | Use the cached representation |
+| `400` | Bad request or validation failure | Fix the request; do not retry unchanged |
+| `401` | Credential missing, malformed, expired, or revoked | Verify/rotate the credential; do not loop |
+| `403` | Valid credential but not allowed | Fix permissions/credential type; do not loop |
+| `404` | Unknown route or resource | Fix the ID or route; do not loop |
+| `409` | State conflict, duplicate, or consumed token | Read `code`; reconcile state |
+| `410` | Expired interaction or resource | Stop answering; send a new interaction |
+| `412` | Precondition failed | Re-read the version/ETag and retry once |
+| `413` | Payload too large | Reduce files/content/body |
+| `429` | Rate limited | Wait `retry_after` and retry once |
+| `500` | Internal error | Backoff; report if persistent |
+| `502` / `503` / `504` | Upstream or capacity failure | Backoff with jitter |
+| `403 GLOBAL_IP_TEMPORARILY_BANNED` | Temporary IP ban | Stop; do not retry |
+
+### 15.2 Common API codes
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `UNAUTHORIZED` | 401 | Missing, malformed, unknown, expired, or revoked credential |
+| `INVALID_TOKEN` | 401 | A bot token or bearer does not resolve |
+| `MISSING_AUTHORIZATION` | 401 | No credential on a protected route |
+| `ACCESS_DENIED` | 403 | Credential type or identity not allowed |
+| `MISSING_ACCESS` | 403 | No access to the guild or resource |
+| `MISSING_PERMISSIONS` | 403 | Missing permission or hierarchy |
+| `MISSING_OAUTH_SCOPE` | 403 | Bearer lacks the required scope |
+| `COMMUNICATION_DISABLED` | 403 | Member timed out |
+| `ACCOUNT_LIMITED` | 403 | Account limitation blocks the action |
+| `TWO_FACTOR_REQUIRED` | 400 | Elevated action needs MFA |
+| `SUDO_MODE_REQUIRED` | 403 | Sensitive operation needs a sudo proof |
+| `CONTENT_BLOCKED` | 403 | Content policy blocked the value |
+| `FEATURE_TEMPORARILY_DISABLED` | 403 | Deployment feature is off |
+| `APPLICATION_COMMAND_FEATURE_DISABLED` | 403 | Bot interaction key is off |
+| `UNKNOWN_GUILD` | 404 | Guild not found |
+| `UNKNOWN_CHANNEL` | 404 | Channel not found or not visible |
+| `UNKNOWN_MESSAGE` | 404 | Message not found |
+| `UNKNOWN_MEMBER` | 404 | Member not found |
+| `UNKNOWN_WEBHOOK` | 404 | Webhook/token pair not found |
+| `INVALID_FORM_BODY` | 400 | Field validation failure; inspect `errors` |
+| `CANNOT_SEND_EMPTY_MESSAGE` | 400 | Message has nothing sendable |
+| `CANNOT_SEND_MESSAGES_TO_USER` | 400 | Recipient DM policy |
+| `CANNOT_EXECUTE_ON_DM` | 400 | Route is guild-only |
+| `RATE_LIMITED` | 429 | Route or global bucket |
+| `GLOBAL_IP_BANNED` | 403 | Permanent IP ban |
+| `GLOBAL_IP_TEMPORARILY_BANNED` | 403 | Temporary IP ban |
+| `INTERACTION_EXPIRED` | 410 | 3-second or 15-minute window passed |
+| `INTERACTION_TOKEN_CONSUMED` | 409 | Interaction already answered |
+| `INTERACTION_NONCE_CONFLICT` | 409 | Nonce/idempotency key reused with another body |
+| `INTERACTION_OUTCOME_UNKNOWN` | 503 | Retry with the same key |
+| `UNSUPPORTED_COMPONENT` | 400 | Component type not offered |
+| `INVALID_COMPONENT_VALUE` | 400 | Select value not on the component |
+| `MODAL_NOT_OPEN` | 409 | Modal submit without an open modal |
+| `APPLICATION_COMMAND_STALE` | 409 | Command changed since load |
+| `APPLICATION_COMMAND_BOT_UNAVAILABLE` | 503 | No bot session took the interaction |
+| `TABLE_GAME_RANKED_IN_PROGRESS` | 409 | Ranked table blocks a theme/channel change |
+| `DISCOVERY_DISABLED` | 400 | Discovery is off on the instance |
+
+### 15.3 Troubleshooting matrix
+
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| `401` on every REST call | Token reset, wrong token, or Discord URL | Re-copy the token; use discovered API base; use `Bot` prefix |
+| `403 ACCESS_DENIED` on a normal bot call | The route is user-only | Do not call feed/shop/table/voice-seat routes with a bot |
+| `403 MISSING_PERMISSIONS` | Bot lacks `VIEW_CHANNEL`/`SEND_MESSAGES`, or its role is too low | Grant permissions and move the bot role up |
+| `404 UNKNOWN_CHANNEL` | Wrong channel ID, wrong guild, or no visibility | Verify IDs from the guild's channel list |
+| Commands work but interactions never arrive | Bot has no live Gateway session, or wrong Gateway URL | Check `READY`; verify `DiscordWebSocket.DEFAULT_GATEWAY` in discord.py |
+| `410 INTERACTION_EXPIRED` | First response took more than 3 seconds | Defer within 3 seconds, then edit |
+| `409 INTERACTION_TOKEN_CONSUMED` | Two code paths answered | Answer once; guard against duplicate handlers |
+| Components render but clicks do nothing | `feature_bot_components` off, or bot not the message author | Check discovery limits; write components on the bot's own message |
+| Link button opens nothing | URL invalid or blocked | Use `https`, at most 512 chars, no credentials |
+| Modal opens but submit fails | Unsupported component or no open modal | Use text inputs only; track modal state |
+| Gateway closes immediately with `4012` | Missing `v=1` | Add `?v=1&encoding=json` |
+| Gateway closes with `4004` | Invalid token or token mismatch | Re-copy the bot token; do not use a user token |
+| Gateway closes with `4011` | More than 2,500 guilds on a shard | Identify with a larger `shard_count` |
+| Gateway closes with `4009` | Heartbeats late | Send heartbeats on the advertised interval and answer server requests |
+| Gateway closes with `4008` | Payload/connection budget exceeded | Reduce frequency; one session per shard; backoff |
+| `429` repeatedly | No backoff or too many shards | Centralize rate limiting; honor `retry_after` |
+| Embeds missing | Missing `EMBED_LINKS` | Grant the bit |
+| Attachments fail | Missing `ATTACH_FILES` or size limit | Grant the bit; check discovery limits |
+| Media URL 403 | Signed URL expired | Re-read the message; refresh URLs |
+| `503 SERVICE_UNAVAILABLE` | Instance overloaded | Wait `Retry-After: 1` and retry with backoff |
+| discord.js hits Discord | `rest.api` still Discord | Set `rest: {api, version: '1'}` |
+| discord.py hits Discord | Gateway URL not replaced | Set `DEFAULT_GATEWAY` from `/v1/gateway/bot` |
+
+### 15.4 Retry policy
+
+- Retry `429` once after `retry_after` / `Retry-After`.
+- Retry `500`, `502`, `503`, and `504` with exponential backoff and jitter, at most 3 times.
+- Retry `503 INTERACTION_OUTCOME_UNKNOWN` with the **same** `Idempotency-Key`.
+- Do not retry `400`, `401`, `403`, `404`, `410`, or a `409` that represents a consumed token.
+- On `412`, re-read the current ETag/version and retry once.
+- Never rotate a token automatically on `401` unless the operator explicitly configured a rotation flow.
+- Never retry a `GLOBAL_IP_TEMPORARILY_BANNED` response.
+
+---
+
+## 16. Minimal recipes
+
+### 16.1 Send a message with Python and the standard library
+
+```python
+import getpass
+import json
+import urllib.error
+import urllib.request
+
+token = getpass.getpass("Micup bot token: ").strip()
+channel_id = input("Channel ID: ").strip()
+
+if not token or not channel_id.isascii() or not channel_id.isdigit():
+    raise SystemExit("A bot token and a numeric channel ID are required.")
+
+try:
+    with urllib.request.urlopen(
+        "https://micup.gg/.well-known/fluxer", timeout=15
+    ) as response:
+        discovery = json.load(response)
+    api = discovery["endpoints"]["api_public"].rstrip("/")
+
+    request = urllib.request.Request(
+        f"{api}/v1/channels/{channel_id}/messages",
+        data=json.dumps({"content": "Merhaba, Micup!"}).encode("utf-8"),
+        headers={
+            "Authorization": f"Bot {token}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=15) as response:
+        message = json.load(response)
+    print("Sent message:", message["id"])
+except urllib.error.HTTPError as error:
+    body = error.read().decode("utf-8", "replace")
+    raise SystemExit(f"HTTP {error.code}: {body}")
+except urllib.error.URLError:
+    raise SystemExit("Could not reach Micup.")
+```
+
+### 16.2 Send a message with Node.js
+
+The Node snippets in this section use top-level `await` and ESM imports. Save them as `.mjs`, or set `"type": "module"` in `package.json`.
+
+```js
+const token = process.env.MICUP_TOKEN;
+const channelId = process.env.MICUP_CHANNEL_ID;
+
+const discovery = await (await fetch('https://micup.gg/.well-known/fluxer')).json();
+const api = discovery.endpoints.api_public.replace(/\/$/, '');
+
+const response = await fetch(`${api}/v1/channels/${channelId}/messages`, {
+  method: 'POST',
+  headers: {
+    Authorization: `Bot ${token}`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({content: 'Merhaba, Micup!'}),
+});
+
+if (!response.ok) {
+  console.error(response.status, await response.text());
+  process.exit(1);
+}
+
+console.log(await response.json());
+```
+
+### 16.3 Minimal discord.js slash command
+
+```js
+import {
+  Client,
+  Events,
+  GatewayIntentBits,
+  MessageFlags,
+  SlashCommandBuilder,
+} from 'discord.js';
+
+const discovery = await (await fetch('https://micup.gg/.well-known/fluxer')).json();
+const api = discovery.endpoints.api_public.replace(/\/$/, '');
+
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds],
+  rest: {api, version: '1'},
+  ws: {version: 1},
+});
+
+client.once(Events.ClientReady, async (readyClient) => {
+  await readyClient.application.commands.create(
+    new SlashCommandBuilder()
+      .setName('ping')
+      .setDescription('Replies with Pong!')
+      .toJSON(),
+  );
+  console.log(`Logged in as ${readyClient.user.username}`);
+});
+
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+  if (interaction.commandName === 'ping') {
+    await interaction.reply({content: '🏓 Pong!', flags: MessageFlags.Ephemeral});
+  }
+});
+
+client.login(process.env.MICUP_TOKEN);
+```
+
+Global commands apply to every guild the bot is in. For immediate testing, register a guild command with `guilds/{guild_id}/commands` or `applicationGuildCommands`; it is scoped to that guild. Save this snippet as `bot.mjs` (or enable ESM) because it uses top-level `await` and `import`.
+
+### 16.4 Minimal discord.py slash command
+
+```python
+import json
+import os
+import urllib.request
+
+import discord
+import discord.gateway
+import discord.http
+import yarl
+from discord import app_commands
+
+TOKEN = os.environ["MICUP_TOKEN"]
+
+with urllib.request.urlopen("https://micup.gg/.well-known/fluxer", timeout=15) as response:
+    API = json.load(response)["endpoints"]["api_public"].rstrip("/")
+
+discord.http.INTERNAL_API_VERSION = 1
+discord.http.Route.BASE = f"{API}/v1"
+
+request = urllib.request.Request(
+    f"{API}/v1/gateway/bot",
+    headers={"Authorization": f"Bot {TOKEN}"},
+)
+with urllib.request.urlopen(request, timeout=15) as response:
+    gateway = json.load(response)["url"]
+discord.gateway.DiscordWebSocket.DEFAULT_GATEWAY = yarl.URL(gateway)
+
+client = discord.Client(intents=discord.Intents.default())
+tree = app_commands.CommandTree(client)
+
+
+@tree.command(name="ping", description="Replies with Pong!")
+async def ping(interaction: discord.Interaction):
+    await interaction.response.send_message("🏓 Pong!", ephemeral=True)
+
+
+@client.event
+async def on_ready():
+    await tree.sync()
+    print(f"Logged in as {client.user}")
+
+
+client.run(TOKEN)
+```
+
+### 16.5 Execute a webhook
+
+```bash
+curl -X POST \
+  "https://micup.gg/api/v1/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN?wait=true" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "Build #128 passed",
+    "username": "CI",
+    "allowed_mentions": {"parse": []}
+  }'
+```
+
+### 16.6 Register a global command with fetch
+
+```js
+const token = process.env.MICUP_TOKEN;
+const applicationId = process.env.MICUP_APPLICATION_ID;
+
+const discovery = await (await fetch('https://micup.gg/.well-known/fluxer')).json();
+const api = discovery.endpoints.api_public.replace(/\/$/, '');
+
+const response = await fetch(`${api}/v1/applications/${applicationId}/commands`, {
+  method: 'PUT',
+  headers: {
+    Authorization: `Bot ${token}`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify([
+    {
+      name: 'ping',
+      description: 'Replies with Pong!',
+      dm_permission: false,
+    },
+  ]),
+});
+
+console.log(response.status, await response.text());
+```
+
+### 16.7 Read a guild's channels
+
+```js
+const response = await fetch(`${api}/v1/guilds/${guildId}/channels`, {
+  headers: {Authorization: `Bot ${token}`},
+});
+if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+const channels = await response.json();
+console.log(channels.filter((channel) => channel.type === 0)); // text channels
+```
+
+---
+
+## 17. Source map and verification
+
+### 17.1 Live documentation
+
+| Topic | URL |
+| --- | --- |
+| Documentation home | <https://micup.gg/docs/> |
+| Authentication | <https://micup.gg/docs/authentication/> |
+| HTTP API | <https://micup.gg/docs/http-api/> |
+| Instance discovery and limits | <https://micup.gg/docs/http-api/instance/> |
+| OAuth2 | <https://micup.gg/docs/http-api/oauth2/> |
+| Applications | <https://micup.gg/docs/http-api/applications/> |
+| Permissions | <https://micup.gg/docs/http-api/permissions/> |
+| Messages | <https://micup.gg/docs/http-api/messages/> |
+| Application commands | <https://micup.gg/docs/http-api/application-commands/> |
+| Interactions | <https://micup.gg/docs/http-api/interactions/> |
+| Webhooks | <https://micup.gg/docs/http-api/webhooks/> |
+| Gateway overview | <https://micup.gg/docs/gateway/overview/> |
+| Gateway commands | <https://micup.gg/docs/gateway/commands/> |
+| Gateway events | <https://micup.gg/docs/gateway/events/> |
+| Gateway opcodes and close codes | <https://micup.gg/docs/gateway/opcodes-and-close-codes/> |
+| Voice | <https://micup.gg/docs/voice/> |
+| Voice seats | <https://micup.gg/docs/http-api/voice-seats/> |
+| Media Proxy | <https://micup.gg/docs/media-proxy/overview/> |
+| Uploads | <https://micup.gg/docs/topics/uploads/> |
+| Turkish bot quick start | <https://micup.gg/docs/bots/hizli-baslangic/> |
+| Turkish interactions guide | <https://micup.gg/docs/bots/etkilesimler/> |
+| MicupBOT | <https://micup.gg/docs/http-api/guild-micupbot/> |
+| Micup Roster | <https://micup.gg/docs/http-api/guild-roster-events/> |
+| Feed | <https://micup.gg/docs/http-api/feed/> |
+| Table games | <https://micup.gg/docs/http-api/table-games/> |
+| Shop | <https://micup.gg/docs/http-api/shop/> |
+| Badges | <https://micup.gg/docs/http-api/users/badges/> |
+| Referral | <https://micup.gg/docs/http-api/referral/> |
+| Interest onboarding | <https://micup.gg/docs/http-api/interest-onboarding/> |
+| Admin API | <https://micup.gg/docs/admin-api/> |
+
+### 17.2 Machine-readable endpoints
+
+```text
+GET https://micup.gg/.well-known/fluxer
+GET https://micup.gg/api/v1/openapi.json
+GET https://micup.gg/api/v1/instance/bot-catalog
+GET https://micup.gg/api/v1/gateway/bot
+```
+
+### 17.3 What was verified
+
+On **26 October 2026**:
+
+- `GET https://micup.gg/.well-known/fluxer` returned HTTP 200 with the endpoint values and feature flags in §1.2.
+- `GET https://micup.gg/api/v1/instance/bot-catalog` returned HTTP 200 with the official Micup bot cards.
+- `GET https://micup.gg/api/v1/gateway/bot` without a credential returned HTTP 401, confirming the route is protected.
+- The live documentation home page and Gateway overview were read successfully.
+- The deployment's OpenAPI document was reachable and described 402 paths and 894 schemas.
+- The Micup source archive contained the documentation source, the permission registry, the Gateway registry, and the Micup-specific route sources referenced here.
+
+### 17.4 What was not verified
+
+These require credentials, test accounts, or a media client and were **not** executed:
+
+- Logging in a real bot and sending a message.
+- Receiving a real `INTERACTION_CREATE` and answering a slash command.
+- A complete OAuth2 authorize/consent/token/refresh cycle.
+- Voice placement and LiveKit media.
+- Table games, shop checkout, referral rewards, and interest onboarding.
+- Admin API behavior.
+
+Treat the relevant sections as protocol documentation, not as a live end-to-end test report.
+
+### 17.5 Maintenance
+
+- Re-read `/.well-known/fluxer` before changing any endpoint.
+- Diff `GET /v1/openapi.json` against this document when routes change.
+- Regenerate `llms-full.txt` after editing `MICUP_DEV_REFERENCE.md`.
+- Update the verification date and §1.2 snapshot when the live instance changes.
+
+---
+
+## 18. License and attribution
+
+This reference describes Micup's public developer API. Micup's documentation and source are derived from the Fluxer project (<https://github.com/fluxerapp/fluxer>) under the **GNU Affero General Public License v3.0 or later** (AGPL-3.0-or-later).
+
+The documentation content in this repository is distributed under the same license. See [LICENSE](./LICENSE).
+
+"Micup" and "Fluxer" names and logos are not covered by the license; the license grants no trademark rights.
+
+Protocol identifiers such as `X-Fluxer-*` headers, `/.well-known/fluxer`, and the `flx_` token prefix are retained for wire compatibility. They are not a claim of affiliation with Fluxer.
