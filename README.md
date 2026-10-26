@@ -60,7 +60,7 @@ This reference addresses most of these errors at their source.
 
 ## Using AI Tools
 
-### Cursor / Windsurf
+### Cursor / Windsurf / Antigravity / Claude Code
 
 1. Clone or download this repository.
 2. Add `MICUP_DEV_REFERENCE.md` to your project.
