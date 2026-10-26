@@ -1,5 +1,5 @@
 # Micup Developer Documentation — For LLMs and AI Agents
-
+### TÜRKÇE DOKÜMANTASYON İÇİN: https://github.com/JustLachin/micup-docs-for-llms/blob/main/TR-README.md
 A consolidated, single-file technical reference designed to help AI coding tools correctly use Micup's public **HTTP API**, **Gateway**, **webhooks**, **voice/media** capabilities, and Micup-specific platform features.
 
 > **Version:** 1.0 · **Live verification:** October 26, 2026  
