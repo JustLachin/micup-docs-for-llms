@@ -1,94 +1,95 @@
-# Micup Geliştirici Dokümantasyonu — LLM'ler ve AI Ajanları için
+# Micup Developer Documentation — For LLMs and AI Agents
 
-Micup'ın herkese açık **HTTP API**, **Gateway**, **webhook**, **ses/medya** ve Micup'a özel platform özelliklerini AI kodlama araçlarının doğru kullanması için hazırlanmış, tek dosyada yoğunlaştırılmış teknik referans.
+A condensed, single-file technical reference designed to help AI coding tools use Micup's public **HTTP API**, **Gateway**, **webhooks**, **voice/media**, and Micup-specific platform features correctly.
 
-> **Sürüm:** 1.0 · **Canlı doğrulama:** 26 Ekim 2026
-> **Canlı dokümanlar:** <https://micup.gg/docs/> · **Keşif:** <https://micup.gg/.well-known/fluxer>
+> **Version:** 1.0 · **Live verification:** October 26, 2026
+> **Live documentation:** <https://micup.gg/docs/> · **Discovery:** <https://micup.gg/.well-known/fluxer>
 
-Bu depo, [jubbio-docs-for-llms](https://github.com/saintberat/jubbio-docs-for-llms) yaklaşımının Micup için uyarlanmış halidir: modellerin Micup yerine Discord API'si uydurmasını engellemek için doğrulanmış uç noktalar, kimlik doğrulama kuralları, Gateway opcode'ları, etkileşim akışı ve Micup'a özel özellikler tek bir referansta toplanır.
+This repository is a Micup adaptation of the [jubbio-docs-for-llms](https://github.com/saintberat/jubbio-docs-for-llms) approach: verified endpoints, authentication rules, Gateway opcodes, the interaction flow, and Micup-specific features are collected in a single reference to prevent models from hallucinating the Discord API instead of the Micup API.
 
-Teknik referans, alan adları, başlıklar ve hata kodlarının birebir korunması için İngilizce yazılmıştır. README ve kullanım notları Türkçedir. Bu depo resmî bir Micup yayını değildir; canlı dokümanların yerini almaz.
+The technical reference is written in English to preserve domain names, headers, and error codes verbatim. The README and usage notes are in English as well (translated from the original Turkish). This repository is not an official Micup release and does not replace the live documentation.
 
 ---
 
-## İçindekiler
+## Table of Contents
 
-| Dosya | Ne işe yarar |
+| File | Purpose |
 | --- | --- |
-| [MICUP_DEV_REFERENCE.md](./MICUP_DEV_REFERENCE.md) | Ana teknik referans. Bot, OAuth2, HTTP API, Gateway, webhook, ses, medya ve Micup özellikleri. |
-| [llms.txt](./llms.txt) | LLM'ler için kısa indeks: canlı doküman bağlantıları ve yerel dosyalar. |
-| [llms-full.txt](./llms-full.txt) | README + ana referansın düz metin birleşimi. Claude Projeleri ve ChatGPT Knowledge için uygundur. |
-| [LICENSE](./LICENSE) | AGPL-3.0-or-later lisans metni. |
+| [MICUP_DEV_REFERENCE.md](./MICUP_DEV_REFERENCE.md) | Main technical reference. Bot, OAuth2, HTTP API, Gateway, webhooks, voice, media, and Micup features. |
+| [llms.txt](./llms.txt) | Short index for LLMs: live documentation links and local files. |
+| [llms-full.txt](./llms-full.txt) | Plain-text combination of the README and the main reference. Suitable for Claude Projects and ChatGPT Knowledge. |
+| [LICENSE](./LICENSE) | AGPL-3.0-or-later license text. |
 
 ---
 
-## Neden bu depo?
+## Why this repository?
 
-Micup yeni bir platformdur ve genel amaçlı modellerin eğitim verisinde Micup API'sinin ayrıntıları yoktur. Bu yüzden modeller sık sık:
+Micup is a new platform, and general-purpose models have no details of the Micup API in their training data. As a result, models frequently:
 
-- Discord'un `discord.com/api` adresini veya `gateway.discord.gg` Gateway'ini kullanır,
-- Micup'ta **bulunmayan** Gateway intent'lerini ve ayrıcalıklı intent onayını varsayar,
-- Etkileşimleri HTTP endpoint'i ile almaya çalışır ve Ed25519 imza doğrulaması ekler,
-- `applications.commands` kapsamını ister,
-- Snowflake'leri JSON sayısı olarak ayrıştırır,
-- Micup'a özel `MicupBOT`, feed, masa oyunları ve mağaza rotalarını botlarla çağırmaya çalışır.
+- Use Discord's `discord.com/api` address or the `gateway.discord.gg` Gateway,
+- Assume Gateway intents that **do not exist** on Micup, along with privileged intent approval,
+- Try to receive interactions via an HTTP endpoint and add Ed25519 signature verification,
+- Request the `applications.commands` scope,
+- Parse snowflakes as JSON numbers,
+- Call Micup-specific `MicupBOT`, feed, board game, and store routes with bot credentials.
 
-Bu referans, bu hataların çoğunu kaynağında kapatır.
+This reference eliminates most of these errors at the source.
 
 ---
 
-## Hızlı gerçekler
+## Quick Facts
 
-| Bileşen | Değer |
+| Component | Value |
 | --- | --- |
-| Keşif | `GET https://micup.gg/.well-known/fluxer` |
-| HTTP API | `endpoints.api_public` + `/v1` (canlı: `https://micup.gg/api/v1`) |
-| Gateway | `endpoints.gateway` + `?v=1&encoding=json` (canlı: `wss://micup.gg/gateway`) |
-| Bot kimlik doğrulama | `Authorization: Bot <token>` |
-| Kullanıcı oturumu | `Authorization: <token>` (şema öneki yok) |
-| OAuth2 | `Bearer <token>`, yalnızca açıkça desteklenen rotalarda |
-| API sürümü | Yalnızca `/v1` |
-| Gateway sürümü | Yalnızca `v=1` |
-| Resmî Micup SDK'sı | Dokümante edilmemiş; discord.js 14 / discord.py 2 kullanın |
+| Discovery | `GET https://micup.gg/.well-known/fluxer` |
+| HTTP API | `endpoints.api_public` + `/v1` (live: `https://micup.gg/api/v1`) |
+| Gateway | `endpoints.gateway` + `?v=1&encoding=json` (live: `wss://micup.gg/gateway`) |
+| Bot authentication | `Authorization: Bot <token>` |
+| User session | `Authorization: <token>` (no scheme prefix) |
+| OAuth2 | `Bearer <token>`, only on explicitly supported routes |
+| API version | Only `/v1` |
+| Gateway version | Only `v=1` |
+| Official Micup SDK | Not documented; use discord.js 14 / discord.py 2 |
 | OpenAPI | `GET https://micup.gg/api/v1/openapi.json` |
-| Bot kataloğu | `GET https://micup.gg/api/v1/instance/bot-catalog` |
-| Canlı dokümanlar | <https://micup.gg/docs/> |
+| Bot catalog | `GET https://micup.gg/api/v1/instance/bot-catalog` |
+| Live documentation | <https://micup.gg/docs/> |
 
-**Önemli:** Bu değerler 26 Ekim 2026'daki canlı keşif yanıtından alınmıştır. Bir istemci her zaman `/.well-known/fluxer` okumalıdır; adresleri koda gömmeyin.
+**Important:** These values were taken from the live discovery response on October 26, 2026. A client should always read `/.well-known/fluxer`; do not hardcode addresses into your code.
 
 ---
 
-## AI araçlarıyla kullanım
+## Using with AI Tools
 
 ### Cursor / Windsurf
 
-1. Depoyu klonlayın veya indirin.
-2. `MICUP_DEV_REFERENCE.md` dosyasını projenize ekleyin.
-3. Cursor'da **Docs** veya proje kuralları bağlamına ekleyin.
-4. Depoyu yayınladıktan sonra `llms.txt` dosyasının ham (raw) URL'sini uzak doküman indeksi olarak ekleyebilirsiniz.
+1. Clone or download the repository.
+2. Add the `MICUP_DEV_REFERENCE.md` file to your project.
+3. Add it to **Docs** or your project rules context in Cursor.
+4. After publishing the repository, you can add the raw URL of the `llms.txt` file as a remote documentation index.
 
-### Claude Projeleri / ChatGPT Custom GPT
+### Claude Projects / ChatGPT Custom GPT
 
-- `MICUP_DEV_REFERENCE.md` veya `llms-full.txt` dosyasını proje bilgi tabanına yükleyin.
-- Uzun bağlam penceresi varsa `llms-full.txt`, daha kısa bağlamda `MICUP_DEV_REFERENCE.md` kullanın.
+- Upload the `MICUP_DEV_REFERENCE.md` or `llms-full.txt` file to the project knowledge base.
+- Use `llms-full.txt` if you have a large context window; use `MICUP_DEV_REFERENCE.md` for a shorter context.
 
-### Sistem promptu
+### System Prompt
 
-Micup kodu üretirken şu kısa yönergeyi sistem promptuna ekleyebilirsiniz:
+When generating Micup code, you can add the following short directive to the system prompt:
 
 ```text
-Micup API'si için yalnızca şu kaynakları doğru kabul et:
-1. https://micup.gg/.well-known/fluxer keşif yanıtı
-2. https://micup.gg/docs/ canlı dokümanları
-3. Bu projedeki MICUP_DEV_REFERENCE.md
+Accept only the following sources as authoritative for the Micup API:
+1. The https://micup.gg/.well-known/fluxer discovery response
+2. The live documentation at https://micup.gg/docs/
+3. The MICUP_DEV_REFERENCE.md file in this project
 
-Micup, Discord değildir. Gateway intent'leri yoktur; etkileşimler HTTP ile
-alınmaz, Gateway üzerinden gelir; Ed25519 imzası ve PING yoktur;
-applications.commands kapsamı yoktur. Tüm snowflake'ler string'dir ve
-API tabanı keşiften okunur. Bilinmeyen bir uç nokta veya alan uydurma.
+Micup is not Discord. There are no Gateway intents; interactions are not
+received over HTTP, they arrive via the Gateway; there is no Ed25519
+signature and no PING; there is no applications.commands scope. All
+snowflakes are strings, and the API base must be read from discovery.
+Do not invent unknown endpoints or fields.
 ```
 
-### Doğrudan API çağrısı
+### Direct API Call
 
 ```js
 const discovery = await (await fetch('https://micup.gg/.well-known/fluxer')).json();
@@ -100,85 +101,85 @@ const response = await fetch(`${api}/v1/channels/${channelId}/messages`, {
     Authorization: `Bot ${process.env.MICUP_TOKEN}`,
     'Content-Type': 'application/json',
   },
-  body: JSON.stringify({content: 'Merhaba, Micup!'}),
+  body: JSON.stringify({content: 'Hello, Micup!'}),
 });
 
 console.log(response.status, await response.text());
 ```
 
-Tam örnekler ve hata yönetimi için [MICUP_DEV_REFERENCE.md](./MICUP_DEV_REFERENCE.md) §16'ya bakın.
+For complete examples and error handling, see **§16** of [MICUP_DEV_REFERENCE.md](./MICUP_DEV_REFERENCE.md).
 
 ---
 
-## İlk botu oluşturma
+## Creating Your First Bot
 
-1. Micup'ta **Ayarlar → Uygulamalar** bölümünü açın.
-2. **Uygulama oluştur** ile bir ad verin. Uygulamayla birlikte bot hesabı da oluşturulur.
-3. **Bot token** değerini hemen kopyalayın. Tam token yalnızca oluşturma veya yenileme yanıtında gösterilir.
-4. Botu davet edin:
+1. Open **Settings → Applications** in Micup.
+2. Click **Create Application** and give it a name. A bot account is created along with the application.
+3. Copy the **bot token** immediately. The full token is only shown in the creation or regeneration response.
+4. Invite the bot:
 
 ```text
-https://micup.gg/oauth2/authorize?client_id=UYGULAMA_ID&scope=bot&permissions=3072
+https://micup.gg/oauth2/authorize?client_id=APPLICATION_ID&scope=bot&permissions=3072
 ```
 
-`3072`, `VIEW_CHANNEL` (1024) + `SEND_MESSAGES` (2048) toplamıdır.
+`3072` is the sum of `VIEW_CHANNEL` (1024) + `SEND_MESSAGES` (2048).
 
-5. Kanal kimliğini `https://micup.gg/channels/SUNUCU_ID/KANAL_ID` bağlantısından alın.
-6. Mesaj gönderin:
+5. Get the channel ID from the `https://micup.gg/channels/SERVER_ID/CHANNEL_ID` URL.
+6. Send a message:
 
 ```bash
-curl -X POST "https://micup.gg/api/v1/channels/KANAL_ID/messages" \
+curl -X POST "https://micup.gg/api/v1/channels/CHANNEL_ID/messages" \
   -H "Authorization: Bot $MICUP_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"content":"Merhaba, Micup!"}'
+  -d '{"content":"Hello, Micup!"}'
 ```
 
-Slash komut, buton, menü ve modal için referansın **§8 Application commands and interactions** bölümüne, Gateway bağlantısı için **§9 Gateway** bölümüne bakın.
+For slash commands, buttons, menus, and modals, see the **§8 Application commands and interactions** section of the reference; for the Gateway connection, see **§9 Gateway**.
 
 ---
 
-## Sık yapılan hatalar
+## Common Mistakes
 
-| Hata | Doğrusu |
+| Mistake | Correct Approach |
 | --- | --- |
-| `https://discord.com/api` kullanmak | `endpoints.api_public` + `/v1` |
-| `wss://gateway.discord.gg` kullanmak | `endpoints.gateway` + `?v=1&encoding=json` |
-| Gateway intent'leri göndermek | Micup'ta intent yoktur; `ignored_events` ve `Lazy Request` kullanın |
-| Etkileşimler için HTTP sunucusu açmak | Etkileşimler Gateway'den `INTERACTION_CREATE` olarak gelir |
-| Ed25519 imzası doğrulamak | Micup imza kullanmaz; etkileşim token'ı kimlik bilgisidir |
-| `applications.commands` istemek | `scope=bot` yeterlidir |
-| Snowflake'i `Number` ile ayrıştırmak | String olarak tutun, tam sayı olarak karşılaştırın |
-| Bot token'ı URL'ye koymak | `Authorization: Bot <token>` kullanın |
-| MicupBOT/feed/mağaza rotalarını botla çağırmak | Bu rotalar kullanıcı oturumu ister; bot `403 ACCESS_DENIED` alır |
-| `403`/`401` yanıtını aynı istekle tekrar denemek | `code` alanını okuyun; kimlik bilgisini veya isteği düzeltin |
-| `429` yanıtını beklemeden tekrarlamak | `retry_after` / `Retry-After` kadar bekleyin |
+| Using `https://discord.com/api` | Use `endpoints.api_public` + `/v1` |
+| Using `wss://gateway.discord.gg` | Use `endpoints.gateway` + `?v=1&encoding=json` |
+| Sending Gateway intents | There are no intents on Micup; use `ignored_events` and `Lazy Request` instead |
+| Opening an HTTP server for interactions | Interactions arrive via the Gateway as `INTERACTION_CREATE` |
+| Verifying an Ed25519 signature | Micup does not use signatures; the interaction token is the credential |
+| Requesting `applications.commands` | `scope=bot` is sufficient |
+| Parsing a snowflake with `Number` | Keep it as a string; compare as full strings |
+| Putting the bot token in a URL | Use `Authorization: Bot <token>` |
+| Calling MicupBOT/feed/store routes with a bot | These routes require a user session; a bot gets `403 ACCESS_DENIED` |
+| Retrying a `403`/`401` response with the same request | Read the `code` field; fix the credentials or the request |
+| Retrying a `429` response without waiting | Wait for `retry_after` / `Retry-After` |
 
 ---
 
-## Kapsam ve doğrulama
+## Scope and Verification
 
-**Doğrulananlar (26 Ekim 2026):**
+**Verified (October 26, 2026):**
 
-- `GET /.well-known/fluxer` → HTTP 200, canlı endpoint ve özellik değerleri.
-- `GET /api/v1/instance/bot-catalog` → HTTP 200, resmî Micup bot kartları.
-- `GET /api/v1/gateway/bot` (kimlik bilgisi olmadan) → HTTP 401.
-- Canlı doküman ana sayfası, Gateway ve HTTP API sayfaları okundu.
-- OpenAPI dokümanı → 402 path, 894 şema.
-- Micup kaynak arşivindeki doküman kaynakları, izin kaydı, Gateway kaydı ve Micup'a özel rotalar.
+- `GET /.well-known/fluxer` → HTTP 200, live endpoint and feature values.
+- `GET /api/v1/instance/bot-catalog` → HTTP 200, official Micup bot cards.
+- `GET /api/v1/gateway/bot` (without credentials) → HTTP 401.
+- Live documentation home, Gateway, and HTTP API pages were read.
+- OpenAPI document → 402 paths, 894 schemas.
+- Documentation sources from the Micup source archive, permission records, Gateway records, and Micup-specific routes.
 
-**Doğrulanmayanlar (kimlik bilgisi/test hesabı gerektirir):**
+**Not verified (requires credentials/a test account):**
 
-- Gerçek bot ile giriş, mesaj gönderme ve etkileşim yanıtlama.
-- Tam OAuth2 yetkilendirme/kod/token/refresh döngüsü.
-- Ses yerleşimi ve LiveKit medyası.
-- Masa oyunları, mağaza ödeme akışı, referral ve ilgi seçimi.
-- Admin API davranışı.
+- Real bot login, message sending, and interaction responses.
+- Full OAuth2 authorization/code/token/refresh cycle.
+- Voice lobbies and LiveKit media.
+- Board games, store payment flow, referrals, and interest selection.
+- Admin API behavior.
 
-Bu bölümler protokol dokümantasyonudur; uçtan uca canlı test raporu değildir.
+These sections are protocol documentation; they are not end-to-end live test reports.
 
 ---
 
-## Depo yapısı ve bakım
+## Repository Structure and Maintenance
 
 ```text
 micup-docs-for-llms/
@@ -189,14 +190,14 @@ micup-docs-for-llms/
 └── LICENSE
 ```
 
-Bakım kuralları:
+Maintenance rules:
 
-- Uç noktaları değiştirmeden önce `/.well-known/fluxer` yanıtını yeniden okuyun.
-- `GET /v1/openapi.json` ile referansı karşılaştırın.
-- `MICUP_DEV_REFERENCE.md` değiştiğinde `llms-full.txt` dosyasını yeniden üretin.
-- Doğrulama tarihini ve canlı keşif anlık görüntüsünü güncelleyin.
+- Re-read the `/.well-known/fluxer` response before changing endpoints.
+- Compare the reference with `GET /v1/openapi.json`.
+- Regenerate the `llms-full.txt` file whenever `MICUP_DEV_REFERENCE.md` changes.
+- Update the verification date and the live discovery snapshot.
 
-`llms-full.txt` üretimi:
+Generating `llms-full.txt`:
 
 ```bash
 cat README.md MICUP_DEV_REFERENCE.md > llms-full.txt
@@ -204,13 +205,13 @@ cat README.md MICUP_DEV_REFERENCE.md > llms-full.txt
 
 ---
 
-## Lisans ve atıf
+## License and Attribution
 
-Bu depodaki dokümantasyon içeriği **AGPL-3.0-or-later** altında dağıtılır. Micup'ın dokümantasyonu ve kaynak kodu, Fluxer projesinden (<https://github.com/fluxerapp/fluxer>) türetilmiştir ve aynı lisansı taşır. Ayrıntılar için [LICENSE](./LICENSE).
+The documentation content in this repository is distributed under the **AGPL-3.0-or-later** license. Micup's documentation and source code are derived from the Fluxer project (<https://github.com/fluxerapp/fluxer>) and carry the same license. See [LICENSE](./LICENSE) for details.
 
-"Micup" ve "Fluxer" adları ile logoları lisans kapsamında değildir; lisans marka hakkı vermez.
+The "Micup" and "Fluxer" names and logos are not covered by the license; the license grants no trademark rights.
 
-`X-Fluxer-*` başlıkları, `/.well-known/fluxer` yolu ve `flx_` token öneki gibi protokol tanımlayıcıları tel uyumluluğu için korunmuştur; Fluxer ile bir bağlantı iddiası değildir.
+Protocol identifiers such as the `X-Fluxer-*` headers, the `/.well-known/fluxer` path, and the `flx_` token prefix are preserved for compatibility; they are not a claim of affiliation with Fluxer.
 
 ---
 
